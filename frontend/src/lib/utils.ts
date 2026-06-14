@@ -1,0 +1,40 @@
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount)
+}
+
+export function formatDate(date: string | Date): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(date))
+}
+
+export function formatNumber(n: number): string {
+  return new Intl.NumberFormat('en-IN').format(n)
+}
+
+/** Stock bar fill % — uses reorder level × 3 as visual max capacity */
+export function getStockLevelPercent(current: number, reorderLevel: number): number {
+  const max = Math.max(reorderLevel * 3, current, 1)
+  return Math.min(100, Math.round((current / max) * 100))
+}
+
+export function getStockBarColor(percent: number): string {
+  if (percent > 60) return 'var(--color-success)'
+  if (percent >= 30) return 'var(--color-warning)'
+  return 'var(--color-danger)'
+}
+
