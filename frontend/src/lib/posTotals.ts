@@ -1,14 +1,8 @@
 /** Money helpers — avoid floating-point drift in POS totals */
 
-export function roundMoney(amount: number): number {
-  if (!Number.isFinite(amount)) return 0
-  return Math.round((amount + Number.EPSILON) * 100) / 100
-}
+import { roundMoney, roundToRupee } from './numbers'
 
-export function roundToRupee(amount: number): number {
-  if (!Number.isFinite(amount)) return 0
-  return Math.round(amount)
-}
+export { roundMoney, roundToRupee, parseMoneyInput } from './numbers'
 
 export interface PosCartLine {
   quantity: number
@@ -68,11 +62,4 @@ export function calculatePosTotals(input: PosTotalsInput): PosTotals {
     roundOff,
     total,
   }
-}
-
-export function parseMoneyInput(raw: string): number {
-  const trimmed = raw.trim()
-  if (trimmed === '' || trimmed === '.') return 0
-  const n = Number(trimmed)
-  return Number.isFinite(n) ? Math.max(0, n) : 0
 }

@@ -1,5 +1,6 @@
 import type { CategoryField } from '@/types'
 import { Input } from '@/components/ui/input'
+import { IntegerInput, MoneyInput } from '@/components/ui/number-input'
 import { isNumericField } from '@/lib/fieldBuilder'
 
 interface DynamicFieldInputProps {
@@ -15,38 +16,30 @@ export function DynamicFieldInput({ field, value, onChange, className }: Dynamic
   const placeholder = field.placeholder || field.name
 
   if (field.fieldType === 'integer' || field.fieldType === 'number') {
+    const num = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10)
     return (
-      <Input
-        type="number"
-        step={1}
+      <IntegerInput
+        min={0}
         className={inputClass}
-        value={value === undefined || value === null ? '' : String(value)}
-        onChange={(e) => {
-          const v = e.target.value
-          onChange(v === '' ? '' : parseInt(v, 10))
-        }}
+        value={Number.isFinite(num) ? num : 0}
+        onChange={(v) => onChange(v === 0 && value === '' ? '' : v)}
         placeholder={placeholder || 'Whole number'}
       />
     )
   }
 
   if (field.fieldType === 'decimal') {
+    const num = typeof value === 'number' ? value : parseFloat(String(value ?? ''))
     return (
-      <Input
-        type="number"
-        step="any"
+      <MoneyInput
         className={inputClass}
-        value={value === undefined || value === null ? '' : String(value)}
-        onChange={(e) => {
-          const v = e.target.value
-          onChange(v === '' ? '' : parseFloat(v))
-        }}
+        value={Number.isFinite(num) ? num : 0}
+        onChange={(v) => onChange(v === 0 && value === '' ? '' : v)}
         placeholder={placeholder || 'Decimal number'}
       />
     )
   }
 
-  // text and any legacy types (color, dropdown, date, etc.) — always free text
   return (
     <Input
       className={inputClass}

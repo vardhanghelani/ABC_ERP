@@ -1,7 +1,10 @@
 /**
- * Reproduce POS sale against configured MONGODB_URI.
- * Usage: npx ts-node-dev --transpile-only scripts/reproduce-sale.ts
+ * Reproduce POS sale against configured MONGODB_URI (one-shot — does NOT watch files).
+ * Usage: CONFIRM_REPRODUCE_SALE=1 npx ts-node --transpile-only scripts/reproduce-sale.ts
+ *
+ * WARNING: Do NOT use ts-node-dev here — file saves re-run the script and create duplicate invoices.
  */
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -13,6 +16,11 @@ import { createSale } from '../src/controllers/saleController';
 import { AuthRequest } from '../src/middleware/auth';
 
 async function main() {
+  if (process.env.CONFIRM_REPRODUCE_SALE !== '1') {
+    console.error('Refusing to run: set CONFIRM_REPRODUCE_SALE=1 to create a test sale in the database.');
+    process.exit(1);
+  }
+
   await connectDB();
 
   const user = await User.findOne({ isActive: true }).sort({ createdAt: 1 });
@@ -52,7 +60,10 @@ async function main() {
     body,
     user,
     ip: '127.0.0.1',
-    headers: { 'user-agent': 'reproduce-sale-script' },
+    headers: {
+      'user-agent': 'reproduce-sale-script',
+      'idempotency-key': crypto.randomUUID(),
+    },
   } as unknown as AuthRequest;
 
   let statusCode = 200;

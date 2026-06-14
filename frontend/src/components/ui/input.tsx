@@ -6,10 +6,11 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, error, ...props }, ref) => (
+  ({ className, error, type, onWheel, ...props }, ref) => (
     <div className="w-full">
       <input
         ref={ref}
+        type={type}
         className={cn(
           'flex h-9 w-full rounded-[var(--radius-md)] border bg-[var(--color-bg-sunken)] px-3',
           'text-[var(--text-base)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]',
@@ -17,8 +18,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           'focus:outline-none focus:border-[var(--color-accent)] focus:[box-shadow:0_0_0_3px_rgba(37,99,235,0.12)]',
           error && 'border-[var(--color-danger)] focus:border-[var(--color-danger)] focus:[box-shadow:0_0_0_3px_rgba(220,38,38,0.12)]',
           'disabled:opacity-50 disabled:cursor-not-allowed',
+          type === 'number' && '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
           className
         )}
+        onWheel={
+          type === 'number'
+            ? (e) => {
+                e.preventDefault()
+                onWheel?.(e)
+              }
+            : onWheel
+        }
         {...props}
       />
       {error && <p className="mt-1 text-[var(--text-xs)] text-[var(--color-danger)]">{error}</p>}

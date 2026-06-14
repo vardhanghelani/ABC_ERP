@@ -1,6 +1,7 @@
 import type { Product } from '@/types'
 import { getMinimumBunch, getSellingPrice, snapToBunch } from '@/lib/productSales'
 import { roundMoney } from '@/lib/posTotals'
+import { parseIntegerInput } from './numbers'
 
 export interface PosCartLine {
   lineId: string
@@ -34,8 +35,8 @@ export function calcLineTotal(quantity: number, unitPrice: number): number {
 export function parseQuantityInput(raw: string): number | null {
   const trimmed = raw.trim()
   if (trimmed === '') return null
-  const n = Number(trimmed)
-  if (!Number.isFinite(n) || n < 0) return null
+  const n = parseIntegerInput(trimmed)
+  if (n <= 0 && trimmed !== '0') return null
   return n
 }
 

@@ -14,6 +14,8 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { IntegerInput, MoneyInput } from '@/components/ui/number-input'
+import { roundInteger, roundMoney } from '@/lib/numbers'
 import { Badge, stockStatusVariant, stockStatusLabel } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { SearchInput } from '@/components/ui/search-input'
@@ -202,9 +204,9 @@ export default function ProductsPage() {
     const payload = {
       name: form.name,
       category: form.category,
-      minStock: form.minStock,
-      minimumBunch: form.minimumBunch,
-      sellingPrice: form.sellingPrice,
+      minStock: roundInteger(form.minStock),
+      minimumBunch: Math.max(1, roundInteger(form.minimumBunch)),
+      sellingPrice: roundMoney(form.sellingPrice),
       attributes,
     }
     if (editingProduct) {
@@ -239,9 +241,9 @@ export default function ProductsPage() {
       name: product.name,
       category: categoryId,
       openingStock: 0,
-      minStock: product.minStock ?? 0,
-      minimumBunch: product.minimumBunch ?? 1,
-      sellingPrice: product.sellingPrice ?? 0,
+      minStock: roundInteger(product.minStock ?? 0),
+      minimumBunch: Math.max(1, roundInteger(product.minimumBunch ?? 1)),
+      sellingPrice: roundMoney(product.sellingPrice ?? 0),
       attributes: { ...attrs },
     })
   }
@@ -355,12 +357,11 @@ export default function ProductsPage() {
             {!editingProduct && (
             <div>
               <label className={importantLabelClass}>Opening Stock</label>
-              <Input
-                type="number"
+              <IntegerInput
                 min={0}
                 className={importantInputClass}
-                value={form.openingStock || ''}
-                onChange={(e) => setForm({ ...form, openingStock: Number(e.target.value) })}
+                value={form.openingStock}
+                onChange={(v) => setForm({ ...form, openingStock: v })}
                 placeholder="How many units you have now"
               />
               <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-secondary)]">
@@ -370,12 +371,11 @@ export default function ProductsPage() {
             )}
             <div>
               <label className={importantLabelClass}>Minimum Bunch</label>
-              <Input
-                type="number"
+              <IntegerInput
                 min={1}
                 className={importantInputClass}
-                value={form.minimumBunch || ''}
-                onChange={(e) => setForm({ ...form, minimumBunch: Math.max(1, Number(e.target.value) || 1) })}
+                value={form.minimumBunch}
+                onChange={(v) => setForm({ ...form, minimumBunch: Math.max(1, v) })}
                 placeholder="e.g. 1000 for 1K packet"
               />
               <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-secondary)]">
@@ -384,13 +384,10 @@ export default function ProductsPage() {
             </div>
             <div className={!editingProduct ? '' : 'sm:col-span-2'}>
               <label className={importantLabelClass}>Selling Price (per piece)</label>
-              <Input
-                type="number"
-                min={0}
-                step="any"
+              <MoneyInput
                 className={importantInputClass}
-                value={form.sellingPrice || ''}
-                onChange={(e) => setForm({ ...form, sellingPrice: Number(e.target.value) })}
+                value={form.sellingPrice}
+                onChange={(v) => setForm({ ...form, sellingPrice: v })}
                 placeholder="Price per piece at counter"
               />
               <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-secondary)]">
@@ -403,11 +400,10 @@ export default function ProductsPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label>Min Stock (alert level)</Label>
-            <Input
-              type="number"
+            <IntegerInput
               min={0}
-              value={form.minStock || ''}
-              onChange={(e) => setForm({ ...form, minStock: Number(e.target.value) })}
+              value={form.minStock}
+              onChange={(v) => setForm({ ...form, minStock: v })}
               placeholder="Low stock warning threshold"
             />
             <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-muted)]">

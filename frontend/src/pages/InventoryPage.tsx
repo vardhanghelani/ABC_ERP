@@ -5,6 +5,7 @@ import type { Product } from '@/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { IntegerInput } from '@/components/ui/number-input'
 import { Card, StatCard } from '@/components/ui/card'
 import { Badge, stockStatusVariant, stockStatusLabel } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
@@ -191,7 +192,7 @@ export default function InventoryPage() {
               {products.map((p) => <option key={p._id} value={p._id}>{p.name} ({p.currentStock})</option>)}
             </Select>
           </div>
-          <div><Label>Quantity</Label><Input type="number" value={movement.quantity || ''} onChange={(e) => setMovement({ ...movement, quantity: Number(e.target.value) })} /></div>
+          <div><Label>Quantity</Label><IntegerInput min={1} value={movement.quantity} onChange={(v) => setMovement({ ...movement, quantity: Math.max(1, v) })} /></div>
           <div><Label>Notes</Label><Input value={movement.notes} onChange={(e) => setMovement({ ...movement, notes: e.target.value })} /></div>
         </div>
       </Drawer>

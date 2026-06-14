@@ -7,6 +7,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/number-input'
 import { SearchInput } from '@/components/ui/search-input'
 import { Card, StatCard } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -286,11 +287,9 @@ export default function CollectPaymentPage() {
               <div>
                 <Label>Amount *</Label>
                 <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    min={0}
-                    value={paymentForm.amount || ''}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) || 0 })}
+                  <MoneyInput
+                    value={paymentForm.amount}
+                    onChange={(v) => setPaymentForm({ ...paymentForm, amount: v })}
                   />
                   {amountDue > 0 && (
                     <Button type="button" variant="secondary" onClick={handlePayFull}>

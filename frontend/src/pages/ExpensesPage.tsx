@@ -5,6 +5,7 @@ import type { Expense } from '@/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/number-input'
 import { Card, StatCard } from '@/components/ui/card'
 import { Drawer } from '@/components/ui/modal'
 import {
@@ -131,14 +132,11 @@ export default function ExpensesPage() {
             </div>
             <div>
               <label className={importantLabelClass}>Amount (Rs.) *</label>
-              <Input
-                type="number"
-                min={0.01}
-                step="any"
+              <MoneyInput
                 className={importantInputClass}
                 placeholder="Enter amount spent"
-                value={form.amount || ''}
-                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) || 0 })}
+                value={form.amount}
+                onChange={(v) => setForm({ ...form, amount: v })}
               />
             </div>
           </div>

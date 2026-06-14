@@ -6,6 +6,7 @@ import type { Customer } from '@/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { IntegerInput, MoneyInput } from '@/components/ui/number-input'
 import { SearchInput } from '@/components/ui/search-input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card } from '@/components/ui/card'
@@ -218,10 +219,10 @@ export default function CustomersPage() {
               <option value="long_term">Long Term (ACC) — Running account</option>
             </Select>
           </div>
-          <div><Label>Credit Limit (₹)</Label><Input type="number" value={form.creditLimit} onChange={(e) => setForm({ ...form, creditLimit: Number(e.target.value) })} /></div>
+          <div><Label>Credit Limit (₹)</Label><MoneyInput value={form.creditLimit} onChange={(v) => setForm({ ...form, creditLimit: v })} /></div>
           <div>
             <Label>Credit Days</Label>
-            <Input type="number" value={form.creditDays} onChange={(e) => setForm({ ...form, creditDays: Number(e.target.value) })} disabled={form.creditTermType === 'long_term'} />
+            <IntegerInput min={0} value={form.creditDays} onChange={(v) => setForm({ ...form, creditDays: v })} disabled={form.creditTermType === 'long_term'} />
           </div>
           <div className="flex items-end pb-1">
             <Checkbox

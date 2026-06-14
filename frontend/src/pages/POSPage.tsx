@@ -16,6 +16,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/number-input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { PosCustomerPicker } from '@/components/pos/PosCustomerPicker'
 import { ProductSpecHighlight } from '@/components/pos/ProductSpecBadges'
@@ -666,12 +667,11 @@ export default function POSPage() {
 
               {paymentMode === 'partial' && (
               <ImportantField label="Amount Paid Now" variant="warning" hint="Enter amount customer pays today — balance goes on credit">
-                <Input
-                  type="number"
+                <MoneyInput
                   className={`${importantInputClass} h-12 text-[var(--text-lg)] border-[var(--color-warning)]/35 focus:border-[var(--color-warning)] focus:[box-shadow:0_0_0_4px_rgba(217,119,6,0.18)]`}
                   placeholder={`Less than ${totals.total.toLocaleString('en-IN')}`}
-                  value={paidAmount || ''}
-                  onChange={(e) => setPaidAmount(Number(e.target.value) || 0)}
+                  value={paidAmount}
+                  onChange={setPaidAmount}
                 />
                 {paidAmount >= totals.total && (
                   <p className="mt-1 text-[var(--text-xs)] text-[var(--color-danger)]">Use Full Pay if customer pays the entire amount.</p>

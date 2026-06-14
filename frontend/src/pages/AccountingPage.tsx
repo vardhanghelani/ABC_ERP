@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, fetchApi, postApi } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
-import { Input, Label } from '@/components/ui/input'
+import { Label } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/number-input'
 import { Card, StatCard } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
@@ -79,7 +80,7 @@ export default function AccountingPage() {
       >
         <div className="grid gap-4 sm:grid-cols-3">
           <div><Label>Type</Label><Select value={paymentForm.type} onChange={(e) => setPaymentForm({ ...paymentForm, type: e.target.value })}><option value="receipt">Receipt</option><option value="payment">Payment</option></Select></div>
-          <div><Label>Amount</Label><Input type="number" value={paymentForm.amount || ''} onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })} /></div>
+          <div><Label>Amount</Label><MoneyInput value={paymentForm.amount} onChange={(v) => setPaymentForm({ ...paymentForm, amount: v })} /></div>
           <div><Label>Method</Label><Select value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank">Bank</option></Select></div>
         </div>
       </Modal>

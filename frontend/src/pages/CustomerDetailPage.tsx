@@ -6,6 +6,7 @@ import type { CustomerSummary, LedgerEntry } from '@/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/number-input'
 import { Card, StatCard } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
@@ -261,7 +262,7 @@ export default function CustomerDetailPage() {
           <div>
             <Label>Amount *</Label>
             <div className="flex gap-2">
-              <Input type="number" value={paymentForm.amount || ''} onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })} />
+              <MoneyInput value={paymentForm.amount} onChange={(v) => setPaymentForm({ ...paymentForm, amount: v })} />
               {amountDue > 0 && (
                 <Button type="button" variant="secondary" onClick={() => setPaymentForm({ ...paymentForm, amount: amountDue, isAdvance: false })}>
                   Full

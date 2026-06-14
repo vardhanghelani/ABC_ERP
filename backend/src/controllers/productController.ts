@@ -14,6 +14,10 @@ import { validateProductAttributes } from '../utils/validateAttributes';
 import { updateStock } from '../services/stockService';
 import { InventoryTransactionType } from '../models/InventoryTransaction';
 import { searchProductsComprehensive } from '../services/productSearchService';
+import { sanitizeInteger, sanitizeMoney } from '../utils/numbers';
+
+const moneyField = z.preprocess((v) => sanitizeMoney(v), z.number().min(0));
+const intField = (min: number) => z.preprocess((v) => sanitizeInteger(v, min), z.number().min(min));
 
 export const productSchema = z.object({
   name: z.string().min(1),
@@ -21,14 +25,14 @@ export const productSchema = z.object({
   brand: z.string().optional(),
   description: z.string().optional(),
   attributes: z.record(z.string(), z.unknown()).optional(),
-  minStock: z.number().min(0).optional(),
-  openingStock: z.number().min(0).optional(),
-  reorderLevel: z.number().min(0).optional(),
-  minimumBunch: z.number().min(1).optional(),
-  sellingPrice: z.number().min(0).optional(),
-  purchasePrice: z.number().min(0).optional(),
-  wholesalePrice: z.number().min(0).optional(),
-  retailPrice: z.number().min(0).optional(),
+  minStock: intField(0).optional(),
+  openingStock: intField(0).optional(),
+  reorderLevel: intField(0).optional(),
+  minimumBunch: intField(1).optional(),
+  sellingPrice: moneyField.optional(),
+  purchasePrice: moneyField.optional(),
+  wholesalePrice: moneyField.optional(),
+  retailPrice: moneyField.optional(),
   status: z.enum(['active', 'inactive']).optional(),
   supplier: z.string().optional(),
   warehouse: z.string().optional(),
@@ -106,7 +110,7 @@ export const createProduct = asyncHandler(async (req: AuthRequest, res: Response
 
   const sku = req.body.sku || generateSKU(category.code);
   const barcode = req.body.barcode || generateUniqueBarcode();
-  const openingStock = Math.max(0, Number(req.body.openingStock) || 0);
+  const openingStock = sanitizeInteger(req.body.openingStock, 0);
   const { openingStock: _omit, ...productData } = req.body;
 
   const product = await Product.create({

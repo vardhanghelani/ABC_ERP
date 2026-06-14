@@ -1,5 +1,6 @@
 import { FieldType, ICategoryField } from '../models/CategoryField';
 import { ApiError } from './ApiError';
+import { sanitizeInteger, sanitizeMoney } from './numbers';
 
 const isBlank = (value: unknown): boolean =>
   value === undefined || value === null || value === '';
@@ -36,10 +37,7 @@ export const validateProductAttributes = (
         if (n === null || !Number.isFinite(n)) {
           throw new ApiError(400, `${field.name} must be a whole number`);
         }
-        if (!Number.isInteger(n)) {
-          throw new ApiError(400, `${field.name} must be a whole number (no decimals)`);
-        }
-        normalized[field.key] = n;
+        normalized[field.key] = sanitizeInteger(n, 0);
         break;
       }
       case FieldType.DECIMAL: {
@@ -47,7 +45,7 @@ export const validateProductAttributes = (
         if (n === null || !Number.isFinite(n)) {
           throw new ApiError(400, `${field.name} must be a number`);
         }
-        normalized[field.key] = n;
+        normalized[field.key] = sanitizeMoney(n, 0);
         break;
       }
       case FieldType.TEXT:
