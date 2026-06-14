@@ -15,6 +15,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { Alert } from '@/components/ui/alert'
 import { StockBarInline } from '@/components/ui/stock-bar'
 import { formatCurrency } from '@/lib/utils'
+import { calculatePosTotals, parseMoneyInput } from '@/lib/posTotals'
 import { Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -34,8 +35,8 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const customerId = selectedCustomer?._id ?? ''
-  const [discount, setDiscount] = useState(0)
-  const [taxRate, setTaxRate] = useState(0)
+  const [discountInput, setDiscountInput] = useState('')
+  const [taxRateInput, setTaxRateInput] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('full')
   const [paidAmount, setPaidAmount] = useState(0)
@@ -129,17 +130,33 @@ export default function POSPage() {
 
   const removeFromCart = (id: string) => setCart((prev) => prev.filter((i) => i.product._id !== id))
 
-  const subtotal = cart.reduce((sum, i) => sum + (i.quantity * i.unitPrice - i.discount), 0)
-  const discountAmount = discount
-  const tax = ((subtotal - discountAmount) * taxRate) / 100
-  const total = Math.round(subtotal - discountAmount + tax)
+  const totals = calculatePosTotals({
+    cart: cart.map((i) => ({
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      discount: i.discount,
+    })),
+    billDiscount: parseMoneyInput(discountInput),
+    taxRate: parseMoneyInput(taxRateInput),
+  })
+
+  const commitDiscountInput = () => {
+    const capped = totals.billDiscount
+    setDiscountInput(capped > 0 ? String(capped) : '')
+  }
+
+  const commitTaxRateInput = () => {
+    const rate = parseMoneyInput(taxRateInput)
+    setTaxRateInput(rate > 0 ? String(rate) : '')
+  }
+
   const paidNow = paymentMode === 'credit'
     ? 0
     : paymentMode === 'full'
-      ? total
+      ? totals.total
       : paidAmount
-  const onAccount = Math.max(0, total - paidNow)
-  const change = Math.max(0, paidNow - total)
+  const onAccount = Math.max(0, totals.total - paidNow)
+  const change = Math.max(0, paidNow - totals.total)
   const isCreditSale = onAccount > 0
 
   const buildPayments = () => {
@@ -152,8 +169,8 @@ export default function POSPage() {
     ? true
     : !!customerId && (
         paymentMode === 'credit'
-          ? total > 0
-          : paidAmount >= 0 && paidAmount < total
+          ? totals.total > 0
+          : paidAmount >= 0 && paidAmount < totals.total
       )
   const creditOk = !isCreditSale || !selectedCustomer?.blockOnCreditLimit || onAccount <= availableCredit
   const canComplete = cartValid && paymentValid && creditOk
@@ -180,10 +197,9 @@ export default function POSPage() {
           unitPrice: i.unitPrice,
           discount: i.discount,
         })),
-        discount: discountAmount,
+        discount: totals.billDiscount,
         discountType: 'fixed',
-        taxRate,
-        roundOff: total - (subtotal - discountAmount + tax),
+        taxRate: parseMoneyInput(taxRateInput),
         payments,
         isPos: true,
       })
@@ -191,7 +207,8 @@ export default function POSPage() {
     onSuccess: (data) => {
       setLastSaleId(data._id)
       setCart([])
-      setDiscount(0)
+      setDiscountInput('')
+      setTaxRateInput('')
       setPaidAmount(0)
       setPaymentMode('full')
       setSelectedCustomer(null)
@@ -215,9 +232,9 @@ export default function POSPage() {
   }
 
   const completeButtonLabel = () => {
-    if (paymentMode === 'credit') return `Complete on Credit — ${formatCurrency(total)}`
+    if (paymentMode === 'credit') return `Complete on Credit — ${formatCurrency(totals.total)}`
     if (isCreditSale) return `Complete — Pay ${formatCurrency(paidNow)}, Credit ${formatCurrency(onAccount)}`
-    return `Complete Sale — ${formatCurrency(total)}`
+    return `Complete Sale — ${formatCurrency(totals.total)}`
   }
 
   return (
@@ -411,17 +428,52 @@ export default function POSPage() {
                 </p>
               </ImportantField>
 
-              <div><Label>Discount (Rs.)</Label><Input type="number" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} /></div>
-              <div><Label>Tax Rate (%)</Label><Input type="number" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} /></div>
+              <div>
+                <Label>Discount (Rs.)</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={discountInput}
+                  onChange={(e) => setDiscountInput(e.target.value)}
+                  onBlur={commitDiscountInput}
+                />
+                {parseMoneyInput(discountInput) > totals.subtotal && totals.subtotal > 0 && (
+                  <p className="mt-1 text-[var(--text-xs)] text-[var(--color-warning)]">
+                    Capped at subtotal ({formatCurrency(totals.subtotal)})
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label>Tax Rate (%)</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={taxRateInput}
+                  onChange={(e) => setTaxRateInput(e.target.value)}
+                  onBlur={commitTaxRateInput}
+                />
+              </div>
 
               <ImportantField label="Bill Total" variant="success" className="!p-4">
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[var(--text-sm)]"><span>Subtotal</span><span className="font-data">{formatCurrency(subtotal)}</span></div>
-                  <div className="flex justify-between text-[var(--text-sm)]"><span>Discount</span><span className="font-data">-{formatCurrency(discountAmount)}</span></div>
-                  <div className="flex justify-between text-[var(--text-sm)]"><span>Tax</span><span className="font-data">{formatCurrency(tax)}</span></div>
+                  <div className="flex justify-between text-[var(--text-sm)]"><span>Subtotal</span><span className="font-data">{formatCurrency(totals.subtotal)}</span></div>
+                  {totals.billDiscount > 0 && (
+                    <div className="flex justify-between text-[var(--text-sm)]"><span>Discount</span><span className="font-data">-{formatCurrency(totals.billDiscount)}</span></div>
+                  )}
+                  {totals.tax > 0 && (
+                    <div className="flex justify-between text-[var(--text-sm)]"><span>Tax</span><span className="font-data">{formatCurrency(totals.tax)}</span></div>
+                  )}
+                  {totals.roundOff !== 0 && (
+                    <div className="flex justify-between text-[var(--text-sm)] text-[var(--color-text-muted)]">
+                      <span>Round off</span>
+                      <span className="font-data">{formatCurrency(totals.roundOff)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t-2 border-[var(--color-success)]/25 pt-3 text-[var(--text-2xl)] font-bold">
                     <span>Total</span>
-                    <span className="font-data text-[var(--color-success)]">{formatCurrency(total)}</span>
+                    <span className="font-data text-[var(--color-success)]">{formatCurrency(totals.total)}</span>
                   </div>
                   {isCreditSale && (
                     <>
@@ -454,17 +506,17 @@ export default function POSPage() {
                 <Input
                   type="number"
                   className={`${importantInputClass} h-12 text-[var(--text-lg)] border-[var(--color-warning)]/35 focus:border-[var(--color-warning)] focus:[box-shadow:0_0_0_4px_rgba(217,119,6,0.18)]`}
-                  placeholder={`Less than ${total.toLocaleString('en-IN')}`}
+                  placeholder={`Less than ${totals.total.toLocaleString('en-IN')}`}
                   value={paidAmount || ''}
                   onChange={(e) => setPaidAmount(Number(e.target.value) || 0)}
                 />
-                {paidAmount >= total && (
+                {paidAmount >= totals.total && (
                   <p className="mt-1 text-[var(--text-xs)] text-[var(--color-danger)]">Use Full Pay if customer pays the entire amount.</p>
                 )}
               </ImportantField>
               )}
 
-              {paymentMode === 'full' && paidNow > total && (
+              {paymentMode === 'full' && paidNow > totals.total && (
                 <p className="font-medium text-[var(--color-success)]">Change: {formatCurrency(change)}</p>
               )}
 

@@ -93,8 +93,9 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
         throw new ApiError(400, `Insufficient stock for ${product.name}`);
       }
 
-      const itemDiscount = item.discount || 0;
-      const itemTotal = item.quantity * item.unitPrice - itemDiscount;
+      const lineGross = Math.round(item.quantity * item.unitPrice * 100) / 100;
+      const itemDiscount = Math.round(Math.max(0, item.discount || 0) * 100) / 100;
+      const itemTotal = Math.round((lineGross - itemDiscount) * 100) / 100;
       subtotal += itemTotal;
 
       items.push({
@@ -111,14 +112,19 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       });
     }
 
+    subtotal = Math.round(subtotal * 100) / 100;
+
     const discount = req.body.discount || 0;
     const discountType = req.body.discountType || 'fixed';
-    const discountAmount = discountType === 'percentage' ? (subtotal * discount) / 100 : discount;
+    let discountAmount = discountType === 'percentage' ? (subtotal * discount) / 100 : discount;
+    discountAmount = Math.round(Math.min(Math.max(0, discountAmount), subtotal) * 100) / 100;
+
     const taxRate = req.body.taxRate || 0;
-    const taxableAmount = subtotal - discountAmount;
-    const tax = (taxableAmount * taxRate) / 100;
-    const roundOff = req.body.roundOff || 0;
-    const total = Math.round(taxableAmount + tax + roundOff);
+    const taxableAmount = Math.round((subtotal - discountAmount) * 100) / 100;
+    const tax = Math.round((taxableAmount * taxRate) * 100) / 10000;
+    const totalBeforeRound = Math.round((taxableAmount + tax) * 100) / 100;
+    const total = Math.round(totalBeforeRound);
+    const roundOff = Math.round((total - totalBeforeRound) * 100) / 100;
 
     if (!req.body.customer) {
       const paidAmount = req.body.payments.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
