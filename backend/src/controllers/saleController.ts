@@ -15,13 +15,21 @@ import {
   reverseSaleLedger,
   checkCreditLimit,
   calculateRiskScore,
+  postLedgerEntry,
 } from '../services/ledgerService';
 import { resolveSaleCredit } from '../services/creditService';
 import { CreditTermType } from '../models';
+import { LedgerEntityType, LedgerTransactionType } from '../models/LedgerEntry';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
 import { toAttributeRecord } from '../utils/attributes';
 import { isDevDiagnosticsEnabled, saleErrorLog, saleLog } from '../utils/saleDiagnostics';
+import {
+  beginSaleIdempotency,
+  completeSaleIdempotency,
+  failSaleIdempotency,
+  loadIdempotentSale,
+} from '../services/saleIdempotencyService';
 
 const saleItemSchema = z.object({
   product: z.string(),
@@ -77,6 +85,21 @@ export const getSale = asyncHandler(async (req: AuthRequest, res: Response) => {
 export const createSale = asyncHandler(async (req: AuthRequest, res: Response) => {
   const startedAt = Date.now();
   const userId = req.user?._id?.toString();
+  const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    || (req.body.idempotencyKey as string | undefined)?.trim();
+
+  const idempotency = await beginSaleIdempotency(userId!, idempotencyKey);
+  if (idempotency.resumeSaleId) {
+    const existingSale = await loadIdempotentSale(idempotency.resumeSaleId);
+    saleLog('SUCCESS', {
+      saleId: existingSale._id.toString(),
+      invoiceNumber: existingSale.invoiceNumber,
+      idempotentReplay: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return ApiResponse.success(res, existingSale, 'Sale completed', 201);
+  }
+
   const debugContext = {
     userId,
     customerId: req.body.customer ?? null,
@@ -163,8 +186,23 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     }
 
     const credit = resolveSaleCredit(customerDoc, total, req.body.payments);
-    const { paidAmount, balanceDue, payments, dueDate, creditTermType } = credit;
+    let { paidAmount, balanceDue, payments, dueDate, creditTermType } = credit;
     phase = 'resolve-credit';
+    let advanceAppliedOnSale = 0;
+
+    // Auto-apply existing advance to new short-term credit sale
+    if (
+      customerDoc &&
+      balanceDue > 0 &&
+      customerDoc.advanceBalance > 0 &&
+      customerDoc.creditTermType === CreditTermType.SHORT_TERM
+    ) {
+      advanceAppliedOnSale = Math.min(customerDoc.advanceBalance, balanceDue);
+      if (advanceAppliedOnSale > 0) {
+        balanceDue = Math.round((balanceDue - advanceAppliedOnSale) * 100) / 100;
+        paidAmount = Math.round((paidAmount + advanceAppliedOnSale) * 100) / 100;
+      }
+    }
 
     if (customerDoc?.creditTermType === CreditTermType.LONG_TERM && !req.body.customer) {
       throw new ApiError(400, 'Long Term (ACC) credit requires a registered customer');
@@ -239,6 +277,27 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     );
 
     phase = 'ledger-update';
+    if (advanceAppliedOnSale > 0 && req.body.customer) {
+      await postLedgerEntry({
+        entityType: LedgerEntityType.CUSTOMER,
+        entityId: req.body.customer,
+        transactionType: LedgerTransactionType.ADVANCE_ADJUSTMENT,
+        referenceNumber: `${invoiceNumber}-ADV-USE`,
+        credit: advanceAppliedOnSale,
+        remarks: `Advance applied to ${invoiceNumber}`,
+        referenceId: saleId,
+        referenceModel: 'Sale',
+        userId: saleUserId,
+        userName,
+        session,
+      });
+      await Customer.findByIdAndUpdate(
+        req.body.customer,
+        { $inc: { advanceBalance: -advanceAppliedOnSale } },
+        { session }
+      );
+    }
+
     if (req.body.customer && customerDoc?.creditTermType === CreditTermType.LONG_TERM) {
       await postSaleLedger(saleId, saleUserId, userName, session);
     } else if (balanceDue > 0 && req.body.customer) {
@@ -275,8 +334,11 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       durationMs: Date.now() - startedAt,
     });
 
+    await completeSaleIdempotency(userId!, idempotencyKey, saleId);
+
     ApiResponse.success(res, sale[0], 'Sale completed', 201);
   } catch (error) {
+    await failSaleIdempotency(userId!, idempotencyKey);
     saleErrorLog(error, { ...debugContext, phase, committed });
 
     if (!committed) {

@@ -18,7 +18,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+    const method = (original?.method || 'get').toLowerCase()
+    const isSafeToRetry = method === 'get' || method === 'head'
+
+    if (error.response?.status === 401 && !original._retry && isSafeToRetry) {
       original._retry = true
       try {
         const { data } = await axios.post(`${API_URL}/auth/refresh`, {}, { withCredentials: true })
@@ -51,8 +54,15 @@ export async function fetchApi<T>(url: string, params?: Record<string, unknown>)
   return data.data
 }
 
-export async function postApi<T>(url: string, body?: unknown): Promise<T> {
-  const { data } = await api.post<ApiResponse<T>>(url, body)
+export async function postApi<T>(
+  url: string,
+  body?: unknown,
+  options?: { idempotencyKey?: string }
+): Promise<T> {
+  const headers = options?.idempotencyKey
+    ? { 'Idempotency-Key': options.idempotencyKey }
+    : undefined
+  const { data } = await api.post<ApiResponse<T>>(url, body, { headers })
   return data.data
 }
 

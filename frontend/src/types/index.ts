@@ -89,6 +89,7 @@ export interface Customer {
 export interface LedgerEntry {
   _id: string
   date: string
+  createdAt?: string
   referenceNumber: string
   transactionType: string
   debit: number
@@ -101,6 +102,7 @@ export interface LedgerEntry {
 export interface CustomerSummary {
   customer: Customer
   currentOutstanding: number
+  netOutstanding: number
   totalPurchases: number
   totalPayments: number
   pendingInvoices: number

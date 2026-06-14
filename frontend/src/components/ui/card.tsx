@@ -49,6 +49,7 @@ export function StatCard({
   deltaLabel,
   accent = 'accent',
   icon: Icon,
+  hint,
 }: {
   label: string
   value: string
@@ -56,6 +57,7 @@ export function StatCard({
   deltaLabel?: string
   accent?: 'accent' | 'success' | 'warning' | 'danger' | 'info'
   icon?: React.ElementType
+  hint?: string
 }) {
   const accentColors = {
     accent: 'var(--color-accent)',
@@ -71,7 +73,7 @@ export function StatCard({
       <CardContent className="pl-6">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[var(--text-xs)] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{label}</p>
+            <p className="text-[var(--text-xs)] font-medium uppercase tracking-wider text-[var(--color-text-muted)]" title={hint}>{label}</p>
             <p className="mt-1 font-data text-[var(--text-2xl)] font-bold text-[var(--color-text-primary)]">{value}</p>
             {delta !== undefined && (
               <p className={cn('mt-1 text-[var(--text-xs)] font-medium', delta >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]')}>

@@ -1,9 +1,18 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchApi, postApi, downloadAuthenticated } from '@/lib/api'
 import type { Product, Customer } from '@/types'
 import { formatBunchLabel, getMinimumBunch, getSellingPrice, snapToBunch } from '@/lib/productSales'
+import {
+  calcLineTotal,
+  createCartLine,
+  formatQuantityDisplay,
+  getProductId,
+  normalizeCartQuantity,
+  stepCartQuantity,
+  type PosCartLine,
+} from '@/lib/posCart'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
@@ -19,12 +28,7 @@ import { calculatePosTotals, parseMoneyInput } from '@/lib/posTotals'
 import { Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 
-interface CartItem {
-  product: Product
-  quantity: number
-  unitPrice: number
-  discount: number
-}
+interface CartItem extends PosCartLine {}
 
 type PaymentMode = 'full' | 'partial' | 'credit'
 
@@ -33,6 +37,8 @@ export default function POSPage() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 200)
   const [cart, setCart] = useState<CartItem[]>([])
+  /** Per-line draft text while user types — avoids number input cross-talk and jumpy snaps */
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({})
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const customerId = selectedCustomer?._id ?? ''
   const [discountInput, setDiscountInput] = useState('')
@@ -41,6 +47,19 @@ export default function POSPage() {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('full')
   const [paidAmount, setPaidAmount] = useState(0)
   const [lastSaleId, setLastSaleId] = useState<string | null>(null)
+  const saleSubmittingRef = useRef(false)
+  const saleIdempotencyKeyRef = useRef<string | null>(null)
+
+  const getSaleIdempotencyKey = useCallback(() => {
+    if (!saleIdempotencyKeyRef.current) {
+      saleIdempotencyKeyRef.current = crypto.randomUUID()
+    }
+    return saleIdempotencyKeyRef.current
+  }, [])
+
+  const resetSaleIdempotencyKey = useCallback(() => {
+    saleIdempotencyKeyRef.current = null
+  }, [])
 
   useEffect(() => { searchRef.current?.focus() }, [])
 
@@ -69,66 +88,94 @@ export default function POSPage() {
   const addToCart = (product: Product) => {
     const step = getMinimumBunch(product)
     const unitPrice = getSellingPrice(product)
+    const productId = getProductId(product)
+    if (!productId) {
+      toast.error('Invalid product — missing id')
+      return
+    }
+
+    let draftLineToClear: string | null = null
 
     setCart((prev) => {
-      const existing = prev.find((i) => i.product._id === product._id)
+      const existing = prev.find((i) => getProductId(i.product) === productId)
       if (existing) {
         const nextQty = existing.quantity + step
         if (nextQty > product.currentStock) {
           toast.error(`Only ${product.currentStock.toLocaleString('en-IN')} pcs in stock`)
           return prev
         }
+        draftLineToClear = existing.lineId
         return prev.map((i) =>
-          i.product._id === product._id ? { ...i, quantity: nextQty, unitPrice } : i
+          i.lineId === existing.lineId ? { ...i, quantity: nextQty, unitPrice, product } : i
         )
       }
       if (step > product.currentStock) {
         toast.error(`Need at least ${step.toLocaleString('en-IN')} pcs — only ${product.currentStock.toLocaleString('en-IN')} in stock`)
         return prev
       }
-      return [...prev, { product, quantity: step, unitPrice, discount: 0 }]
+      return [...prev, createCartLine(product, step)]
     })
+
+    if (draftLineToClear) {
+      setQtyDrafts((drafts) => {
+        if (!(draftLineToClear! in drafts)) return drafts
+        const next = { ...drafts }
+        delete next[draftLineToClear!]
+        return next
+      })
+    }
+
     setSearch('')
   }
 
-  const stepQty = (id: string, direction: 1 | -1) => {
-    setCart((prev) => prev.map((i) => {
-      if (i.product._id !== id) return i
-      const step = getMinimumBunch(i.product)
-      const next = i.quantity + direction * step
-      if (next < step) return i
-      if (next > i.product.currentStock) {
-        toast.error(`Only ${i.product.currentStock.toLocaleString('en-IN')} pcs in stock`)
-        return i
+  const stepQty = (lineId: string, direction: 1 | -1) => {
+    setCart((prev) => {
+      const item = prev.find((i) => i.lineId === lineId)
+      if (!item) return prev
+      const next = stepCartQuantity(item.quantity, item.product, direction)
+      if (next == null) {
+        if (direction === 1) {
+          toast.error(`Only ${item.product.currentStock.toLocaleString('en-IN')} pcs in stock`)
+        }
+        return prev
       }
-      return { ...i, quantity: next }
-    }))
+      setQtyDrafts((drafts) => {
+        const copy = { ...drafts }
+        delete copy[lineId]
+        return copy
+      })
+      return prev.map((i) => (i.lineId === lineId ? { ...i, quantity: next } : i))
+    })
   }
 
-  const setItemQuantity = (id: string, raw: string) => {
-    setCart((prev) => prev.map((i) => {
-      if (i.product._id !== id) return i
-      if (raw === '') return { ...i, quantity: 0 }
-      const parsed = Number(raw)
-      if (Number.isNaN(parsed)) return i
-      return { ...i, quantity: parsed }
-    }))
+  const setItemQuantityDraft = (lineId: string, raw: string) => {
+    setQtyDrafts((prev) => ({ ...prev, [lineId]: raw }))
   }
 
-  const commitItemQuantity = (id: string) => {
-    setCart((prev) => prev.map((i) => {
-      if (i.product._id !== id) return i
-      const step = getMinimumBunch(i.product)
-      let qty = snapToBunch(i.quantity || step, step)
-      if (qty > i.product.currentStock) {
-        qty = snapToBunch(i.product.currentStock, step)
-        toast.error(`Adjusted to available stock (${qty.toLocaleString('en-IN')} pcs)`)
-      }
-      return { ...i, quantity: qty }
-    }))
+  const commitItemQuantity = (lineId: string) => {
+    setCart((prev) => {
+      const item = prev.find((i) => i.lineId === lineId)
+      if (!item) return prev
+      const raw = qtyDrafts[lineId] ?? formatQuantityDisplay(item.quantity)
+      const { quantity, adjusted, message } = normalizeCartQuantity(raw, item.product)
+      if (adjusted && message) toast.error(message)
+      return prev.map((i) => (i.lineId === lineId ? { ...i, quantity } : i))
+    })
+    setQtyDrafts((prev) => {
+      const next = { ...prev }
+      delete next[lineId]
+      return next
+    })
   }
 
-  const removeFromCart = (id: string) => setCart((prev) => prev.filter((i) => i.product._id !== id))
+  const removeFromCart = (lineId: string) => {
+    setCart((prev) => prev.filter((i) => i.lineId !== lineId))
+    setQtyDrafts((prev) => {
+      const next = { ...prev }
+      delete next[lineId]
+      return next
+    })
+  }
 
   const totals = calculatePosTotals({
     cart: cart.map((i) => ({
@@ -189,24 +236,31 @@ export default function POSPage() {
       }
 
       const payments = buildPayments()
-      return postApi<{ invoiceNumber: string; _id: string }>('/sales', {
-        customer: customerId || undefined,
-        items: cart.map((i) => ({
-          product: i.product._id,
-          quantity: snapToBunch(i.quantity, getMinimumBunch(i.product)),
-          unitPrice: i.unitPrice,
-          discount: i.discount,
-        })),
-        discount: totals.billDiscount,
-        discountType: 'fixed',
-        taxRate: parseMoneyInput(taxRateInput),
-        payments,
-        isPos: true,
-      })
+      return postApi<{ invoiceNumber: string; _id: string }>(
+        '/sales',
+        {
+          customer: customerId || undefined,
+          items: cart.map((i) => ({
+            product: getProductId(i.product),
+            quantity: snapToBunch(i.quantity, getMinimumBunch(i.product)),
+            unitPrice: i.unitPrice,
+            discount: i.discount,
+          })),
+          discount: totals.billDiscount,
+          discountType: 'fixed',
+          taxRate: parseMoneyInput(taxRateInput),
+          payments,
+          isPos: true,
+        },
+        { idempotencyKey: getSaleIdempotencyKey() }
+      )
     },
     onSuccess: (data) => {
+      resetSaleIdempotencyKey()
+      saleSubmittingRef.current = false
       setLastSaleId(data._id)
       setCart([])
+      setQtyDrafts({})
       setDiscountInput('')
       setTaxRateInput('')
       setPaidAmount(0)
@@ -218,9 +272,17 @@ export default function POSPage() {
           : `Sale completed! ${data.invoiceNumber}`
       )
     },
-    onError: (err: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(err.response?.data?.message || err.message || 'Sale failed'),
+    onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
+      saleSubmittingRef.current = false
+      toast.error(err.response?.data?.message || err.message || 'Sale failed')
+    },
   })
+
+  const handleCompleteSale = () => {
+    if (saleSubmittingRef.current || completeSale.isPending || !canComplete) return
+    saleSubmittingRef.current = true
+    completeSale.mutate()
+  }
 
   const handleBarcodeSearch = async (barcode: string) => {
     try {
@@ -331,8 +393,10 @@ export default function POSPage() {
                 <div className="space-y-3">
                   {cart.map((item) => {
                     const step = getMinimumBunch(item.product)
+                    const qtyDisplay = qtyDrafts[item.lineId] ?? formatQuantityDisplay(item.quantity)
+                    const lineTotal = calcLineTotal(item.quantity, item.unitPrice)
                     return (
-                      <div key={item.product._id} className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border-2 border-[var(--color-border-soft)] p-3">
+                      <div key={item.lineId} className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border-2 border-[var(--color-border-soft)] p-3">
                         <div className="min-w-[200px] flex-1 space-y-2">
                           <p className="text-[var(--text-sm)] font-semibold text-[var(--color-text-secondary)]">{item.product.name}</p>
                           <ProductSpecHighlight product={item.product} size="lg" />
@@ -341,27 +405,31 @@ export default function POSPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2 rounded-[var(--radius-lg)] border-2 border-[var(--color-accent)]/30 bg-[var(--color-accent-light)]/60 p-1.5 shadow-[var(--shadow-xs)]">
-                          <Button size="sm" variant="secondary" iconOnly onClick={() => stepQty(item.product._id, -1)}>
+                          <Button size="sm" variant="secondary" iconOnly onClick={() => stepQty(item.lineId, -1)}>
                             <Minus className="h-[18px] w-[18px]" />
                           </Button>
                           <Input
-                            type="number"
-                            min={step}
-                            step={step}
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             className={importantQtyClass}
-                            value={item.quantity === 0 ? '' : item.quantity}
-                            onChange={(e) => setItemQuantity(item.product._id, e.target.value)}
-                            onBlur={() => commitItemQuantity(item.product._id)}
+                            value={qtyDisplay}
+                            aria-label={`Quantity for ${item.product.name}`}
+                            onChange={(e) => setItemQuantityDraft(item.lineId, e.target.value.replace(/[^\d]/g, ''))}
+                            onBlur={() => commitItemQuantity(item.lineId)}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') commitItemQuantity(item.product._id)
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                commitItemQuantity(item.lineId)
+                              }
                             }}
                           />
-                          <Button size="sm" variant="secondary" iconOnly onClick={() => stepQty(item.product._id, 1)}>
+                          <Button size="sm" variant="secondary" iconOnly onClick={() => stepQty(item.lineId, 1)}>
                             <Plus className="h-[18px] w-[18px]" />
                           </Button>
                         </div>
-                        <p className="w-28 text-right font-data text-lg font-bold text-[var(--color-accent)]">{formatCurrency(item.quantity * item.unitPrice)}</p>
-                        <Button size="sm" variant="danger" iconOnly onClick={() => removeFromCart(item.product._id)}>
+                        <p className="w-28 text-right font-data text-lg font-bold text-[var(--color-accent)]">{formatCurrency(lineTotal)}</p>
+                        <Button size="sm" variant="danger" iconOnly onClick={() => removeFromCart(item.lineId)}>
                           <Trash2 className="h-[18px] w-[18px]" />
                         </Button>
                       </div>
@@ -527,9 +595,9 @@ export default function POSPage() {
               <Button
                 className="w-full shadow-[var(--shadow-lg)] ring-2 ring-[var(--color-accent)]/25"
                 size="lg"
-                disabled={!canComplete}
+                disabled={!canComplete || completeSale.isPending}
                 loading={completeSale.isPending}
-                onClick={() => completeSale.mutate()}
+                onClick={handleCompleteSale}
               >
                 {completeButtonLabel()}
               </Button>

@@ -35,22 +35,51 @@ interface PostLedgerParams {
   session?: mongoose.ClientSession;
 }
 
+function roundLedgerAmount(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
+/** Latest passbook balance — must follow insert order, not back-dated `date`. */
 export const getLastBalance = async (
   entityType: LedgerEntityType,
   entityId: string,
   session?: mongoose.ClientSession
 ): Promise<number> => {
   const last = await LedgerEntry.findOne({ entityType, entityId, isVoided: false })
-    .sort({ date: -1, createdAt: -1 })
+    .sort({ createdAt: -1 })
     .session(session || null);
   return last?.runningBalance ?? 0;
+};
+
+/** Rebuild running balances in true chronological (createdAt) order. */
+export const syncLedgerRunningBalances = async (
+  entityType: LedgerEntityType,
+  entityId: string,
+  session?: mongoose.ClientSession
+): Promise<number> => {
+  const entries = await LedgerEntry.find({ entityType, entityId, isVoided: false })
+    .sort({ createdAt: 1 })
+    .session(session || null);
+
+  let balance = 0;
+  for (const entry of entries) {
+    balance = roundLedgerAmount(balance + (entry.debit || 0) - (entry.credit || 0));
+    if (entry.runningBalance !== balance) {
+      await LedgerEntry.updateOne(
+        { _id: entry._id },
+        { $set: { runningBalance: balance } },
+        { session }
+      );
+    }
+  }
+  return balance;
 };
 
 export const postLedgerEntry = async (params: PostLedgerParams) => {
   const debit = params.debit || 0;
   const credit = params.credit || 0;
   const previousBalance = await getLastBalance(params.entityType, params.entityId, params.session);
-  const runningBalance = previousBalance + debit - credit;
+  const runningBalance = roundLedgerAmount(previousBalance + debit - credit);
 
   const entry = await LedgerEntry.create(
     [{
@@ -177,7 +206,7 @@ export const getCustomerSummary = async (
       entityId: customerId,
       isVoided: false,
     })
-      .sort({ date: -1, createdAt: -1 })
+      .sort({ createdAt: -1 })
       .select('date'),
   ]);
 
@@ -200,6 +229,7 @@ export const getCustomerSummary = async (
   return {
     customer,
     currentOutstanding: customer.outstandingAmount,
+    netOutstanding: roundLedgerAmount(customer.outstandingAmount - customer.advanceBalance),
     totalPurchases: customer.totalPurchases,
     totalPayments: customer.totalPayments,
     pendingInvoices: pendingInvoices.length,
@@ -238,11 +268,14 @@ export const getLedgerView = async (
   limit = 50,
   sortOrder: 'asc' | 'desc' = 'asc'
 ) => {
-  const skip = (page - 1) * limit;
+  // Fix stored balances when back-dated payments broke the chain
+  await syncLedgerRunningBalances(entityType, entityId);
+
   const filter = { entityType, entityId, isVoided: false };
   const sort = sortOrder === 'desc'
-    ? { date: -1 as const, createdAt: -1 as const }
-    : { date: 1 as const, createdAt: 1 as const };
+    ? { createdAt: -1 as const }
+    : { createdAt: 1 as const };
+  const skip = (page - 1) * limit;
 
   const [entries, total] = await Promise.all([
     LedgerEntry.find(filter).sort(sort).skip(skip).limit(limit),
@@ -365,22 +398,43 @@ export const postPaymentLedger = async (
   if (!payment || payment.isVoided) return;
 
   if (payment.customer && payment.type === PaymentType.RECEIPT) {
-    await postLedgerEntry({
-      entityType: LedgerEntityType.CUSTOMER,
-      entityId: payment.customer.toString(),
-      transactionType: payment.isAdvance
-        ? LedgerTransactionType.ADVANCE_PAYMENT
-        : LedgerTransactionType.PAYMENT_RECEIVED,
-      referenceNumber: payment.paymentNumber,
-      credit: payment.amount,
-      remarks: payment.notes || `Payment via ${payment.method}`,
-      referenceId: paymentId,
-      referenceModel: 'Payment',
-      date: payment.date,
-      userId,
-      userName,
-      session,
-    });
+    const allocatedToInvoices = (payment.allocations || []).reduce((sum, a) => sum + (a.amount || 0), 0);
+    const invoiceCredit = roundLedgerAmount(Math.min(payment.amount, allocatedToInvoices));
+    const advanceCredit = roundLedgerAmount(payment.amount - invoiceCredit);
+
+    if (invoiceCredit > 0) {
+      await postLedgerEntry({
+        entityType: LedgerEntityType.CUSTOMER,
+        entityId: payment.customer.toString(),
+        transactionType: LedgerTransactionType.PAYMENT_RECEIVED,
+        referenceNumber: payment.paymentNumber,
+        credit: invoiceCredit,
+        remarks: payment.notes || `Payment via ${payment.method}`,
+        referenceId: paymentId,
+        referenceModel: 'Payment',
+        date: payment.date,
+        userId,
+        userName,
+        session,
+      });
+    }
+
+    if (advanceCredit > 0) {
+      await postLedgerEntry({
+        entityType: LedgerEntityType.CUSTOMER,
+        entityId: payment.customer.toString(),
+        transactionType: LedgerTransactionType.ADVANCE_PAYMENT,
+        referenceNumber: `${payment.paymentNumber}-ADV`,
+        credit: advanceCredit,
+        remarks: payment.notes || `Advance via ${payment.method}`,
+        referenceId: paymentId,
+        referenceModel: 'Payment',
+        date: payment.date,
+        userId,
+        userName,
+        session,
+      });
+    }
 
     await Customer.findByIdAndUpdate(
       payment.customer,

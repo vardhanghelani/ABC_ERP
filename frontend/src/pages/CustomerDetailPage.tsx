@@ -17,7 +17,7 @@ import { PageSkeleton } from '@/components/ui/skeleton'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
   IndianRupee, Download, MessageCircle, AlertTriangle,
   CreditCard, TrendingUp, Shield,
@@ -75,6 +75,8 @@ export default function CustomerDetailPage() {
   const { customer } = summary
   const ledger: LedgerEntry[] = ledgerData?.data || []
   const riskVariant = RISK_VARIANTS[summary.riskCategory || 'low'] || 'muted'
+  const netLedgerBalance = summary.netOutstanding ?? (summary.currentOutstanding - summary.advanceBalance)
+  const lastLedgerBalance = ledger.length > 0 ? ledger[ledger.length - 1].runningBalance : 0
 
   return (
     <div className="space-y-6">
@@ -110,11 +112,30 @@ export default function CustomerDetailPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Outstanding" value={formatCurrency(summary.currentOutstanding)} icon={IndianRupee} accent={summary.currentOutstanding > 0 ? 'warning' : 'accent'} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          label="Net Outstanding"
+          value={formatCurrency(netLedgerBalance)}
+          icon={IndianRupee}
+          accent={netLedgerBalance > 0 ? 'warning' : 'success'}
+          hint="Actual receivable after adjusting advance balance (Outstanding − Advance)."
+        />
+        <StatCard
+          label="Outstanding"
+          value={formatCurrency(summary.currentOutstanding)}
+          icon={IndianRupee}
+          accent={summary.currentOutstanding > 0 ? 'warning' : 'accent'}
+          hint="Total unpaid amount still on invoices."
+        />
         <StatCard label="Overdue" value={formatCurrency(summary.overdueAmount)} icon={AlertTriangle} accent={summary.overdueAmount > 0 ? 'danger' : 'success'} />
         <StatCard label="Available Credit" value={formatCurrency(summary.availableCredit)} icon={CreditCard} accent="info" />
-        <StatCard label="Advance Balance" value={formatCurrency(summary.advanceBalance)} icon={TrendingUp} accent="success" />
+        <StatCard
+          label="Advance Balance"
+          value={formatCurrency(summary.advanceBalance)}
+          icon={TrendingUp}
+          accent="success"
+          hint="Money received from customer not yet applied to invoices."
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -148,12 +169,16 @@ export default function CustomerDetailPage() {
 
       {tab === 'ledger' && (
         <Card className="overflow-hidden">
+          <div className="border-b border-[var(--color-border-soft)] px-4 py-3 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
+            Entries shown in the order they were recorded. Debits (invoices) increase balance owed; credits (payments) reduce it.
+            Net balance = Outstanding ({formatCurrency(summary.currentOutstanding)}) − Advance ({formatCurrency(summary.advanceBalance)}) = {formatCurrency(netLedgerBalance)}.
+          </div>
           <DataTableWrapper loading={ledgerLoading} empty={!ledgerLoading && ledger.length === 0} emptyTitle="No ledger entries yet">
             <div className="max-h-[500px] overflow-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Date</TableHead>
+                    <TableHead>When</TableHead>
                     <TableHead>Reference</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead align="right">Debit</TableHead>
@@ -166,7 +191,12 @@ export default function CustomerDetailPage() {
                 <TableBody>
                   {ledger.map((entry) => (
                     <TableRow key={entry._id}>
-                      <TableCell>{formatDate(entry.date)}</TableCell>
+                      <TableCell>
+                        <div>{formatDate(entry.createdAt || entry.date)}</div>
+                        {entry.createdAt && (
+                          <div className="text-[var(--text-xs)] text-[var(--color-text-muted)]">{formatDateTime(entry.createdAt)}</div>
+                        )}
+                      </TableCell>
                       <TableCell mono className="text-[var(--text-xs)]">{entry.referenceNumber}</TableCell>
                       <TableCell><Badge variant="muted" className="normal-case capitalize">{entry.transactionType.replace(/_/g, ' ')}</Badge></TableCell>
                       <TableCell align="right" mono className="text-[var(--color-danger)]">{entry.debit > 0 ? formatCurrency(entry.debit) : '—'}</TableCell>
@@ -176,6 +206,15 @@ export default function CustomerDetailPage() {
                       <TableCell className="text-[var(--text-xs)]">{entry.createdByName}</TableCell>
                     </TableRow>
                   ))}
+                  {ledger.length > 0 && (
+                    <TableRow className="bg-[var(--color-surface-muted)]/60 font-semibold">
+                      <TableCell colSpan={5} align="right">Closing balance (net owed after advance)</TableCell>
+                      <TableCell align="right" mono>{formatCurrency(lastLedgerBalance)}</TableCell>
+                      <TableCell colSpan={2} className="text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                        Should match {formatCurrency(netLedgerBalance)}
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>

@@ -15,3 +15,4 @@ export { Notification, NotificationType } from './Notification';
 export { AuditLog, AuditAction } from './AuditLog';
 export { Settings, DEFAULT_SETTINGS } from './Settings';
 export { DocumentCounter } from './DocumentCounter';
+export { IdempotencyRecord, IdempotencyStatus } from './IdempotencyRecord';

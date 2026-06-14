@@ -77,6 +77,10 @@ export const getCustomer = asyncHandler(async (req: AuthRequest, res: Response) 
 });
 
 export const createCustomer = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const phoneTaken = await Customer.findOne({ phone: req.body.phone.trim() });
+  if (phoneTaken) {
+    throw new ApiError(409, `Phone ${req.body.phone} is already used by customer "${phoneTaken.name}"`);
+  }
   const customer = await Customer.create({ ...req.body, createdBy: req.user!._id });
   await logAudit(req, AuditAction.CREATE, 'Customer', customer._id.toString());
   ApiResponse.success(res, customer, 'Customer created', 201);
@@ -84,6 +88,15 @@ export const createCustomer = asyncHandler(async (req: AuthRequest, res: Respons
 
 export const updateCustomer = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { outstandingAmount, totalPurchases, totalPayments, advanceBalance, riskScore, riskCategory, isActive, ...safeData } = req.body;
+  if (safeData.phone) {
+    const phoneTaken = await Customer.findOne({
+      phone: String(safeData.phone).trim(),
+      _id: { $ne: req.params.id },
+    });
+    if (phoneTaken) {
+      throw new ApiError(409, `Phone ${safeData.phone} is already used by customer "${phoneTaken.name}"`);
+    }
+  }
   const customer = await Customer.findByIdAndUpdate(req.params.id, safeData, { new: true, runValidators: true });
   if (!customer) throw new ApiError(404, 'Customer not found');
   await logAudit(req, AuditAction.UPDATE, 'Customer', customer._id.toString(), safeData);
@@ -109,6 +122,7 @@ export const addCustomerNote = asyncHandler(async (req: AuthRequest, res: Respon
 export const getCustomerLedger = asyncHandler(async (req: AuthRequest, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
-  const result = await getLedgerView(LedgerEntityType.CUSTOMER, paramId(req.params.id), page, limit);
+  const sortOrder = (req.query.sort as 'asc' | 'desc') || 'asc';
+  const result = await getLedgerView(LedgerEntityType.CUSTOMER, paramId(req.params.id), page, limit, sortOrder);
   ApiResponse.paginated(res, result.entries, { page, limit, total: result.total });
 });
