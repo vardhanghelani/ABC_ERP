@@ -41,7 +41,13 @@ export const env = {
   jwtRefreshSecret: resolveSecret('JWT_REFRESH_SECRET', process.env.JWT_REFRESH_SECRET, 'refresh-secret'),
   jwtAccessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
   jwtRefreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  /** Comma-separated allowed browser origins for CORS (e.g. http://localhost:5173,https://app.example.com) */
+  clientUrls: (process.env.CLIENT_URL || 'http://localhost:5173')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean),
+  /** Primary origin — used for redirects/links when a single URL is needed */
+  clientUrl: (process.env.CLIENT_URL || 'http://localhost:5173').split(',')[0].trim(),
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
     apiKey: process.env.CLOUDINARY_API_KEY || '',

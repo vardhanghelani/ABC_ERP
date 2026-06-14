@@ -15,7 +15,19 @@ if (env.nodeEnv === 'production') {
 }
 
 app.use(helmet());
-app.use(cors({ origin: env.clientUrl, credentials: true }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser clients (no Origin header) and configured frontend URLs
+      if (!origin || env.clientUrls.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
+    credentials: true,
+  })
+);
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));

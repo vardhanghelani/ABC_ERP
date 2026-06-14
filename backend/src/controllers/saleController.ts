@@ -20,6 +20,7 @@ import { resolveSaleCredit } from '../services/creditService';
 import { CreditTermType } from '../models';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
+import { toAttributeRecord } from '../utils/attributes';
 
 const saleItemSchema = z.object({
   product: z.string(),
@@ -108,7 +109,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
         discount: itemDiscount,
         tax: 0,
         total: itemTotal,
-        attributes: Object.fromEntries(product.attributes || new Map()),
+        attributes: toAttributeRecord(product.attributes),
       });
     }
 
