@@ -21,6 +21,7 @@ import { CreditTermType } from '../models';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
 import { toAttributeRecord } from '../utils/attributes';
+import { isDevDiagnosticsEnabled, saleErrorLog, saleLog } from '../utils/saleDiagnostics';
 
 const saleItemSchema = z.object({
   product: z.string(),
@@ -74,11 +75,28 @@ export const getSale = asyncHandler(async (req: AuthRequest, res: Response) => {
 });
 
 export const createSale = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const startedAt = Date.now();
+  const userId = req.user?._id?.toString();
+  const debugContext = {
+    userId,
+    customerId: req.body.customer ?? null,
+    itemCount: req.body.items?.length ?? 0,
+    items: req.body.items,
+    payments: req.body.payments,
+    discount: req.body.discount,
+    taxRate: req.body.taxRate,
+    isPos: req.body.isPos,
+  };
+
+  saleLog('START', debugContext);
+
   const session = await mongoose.startSession();
   let committed = false;
+  let phase = 'init';
 
   try {
     session.startTransaction();
+    phase = 'load-products';
 
     const productIds = req.body.items.map((item: { product: string }) => item.product);
     const products = await Product.find({ _id: { $in: productIds } }).session(session);
@@ -86,6 +104,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
 
     const items = [];
     let subtotal = 0;
+    phase = 'build-items';
 
     for (const item of req.body.items) {
       const product = productMap.get(item.product);
@@ -114,6 +133,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     }
 
     subtotal = Math.round(subtotal * 100) / 100;
+    phase = 'calculate-totals';
 
     const discount = req.body.discount || 0;
     const discountType = req.body.discountType || 'fixed';
@@ -126,6 +146,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     const totalBeforeRound = Math.round((taxableAmount + tax) * 100) / 100;
     const total = Math.round(totalBeforeRound);
     const roundOff = Math.round((total - totalBeforeRound) * 100) / 100;
+    phase = 'validate-payment';
 
     if (!req.body.customer) {
       const paidAmount = req.body.payments.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
@@ -135,6 +156,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     }
 
     let customerDoc = null;
+    phase = 'load-customer';
     if (req.body.customer) {
       customerDoc = await Customer.findById(req.body.customer).session(session);
       if (!customerDoc) throw new ApiError(404, 'Customer not found');
@@ -142,6 +164,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
 
     const credit = resolveSaleCredit(customerDoc, total, req.body.payments);
     const { paidAmount, balanceDue, payments, dueDate, creditTermType } = credit;
+    phase = 'resolve-credit';
 
     if (customerDoc?.creditTermType === CreditTermType.LONG_TERM && !req.body.customer) {
       throw new ApiError(400, 'Long Term (ACC) credit requires a registered customer');
@@ -156,6 +179,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       customerName = customerDoc.name;
 
       if (balanceDue > 0) {
+        phase = 'credit-check';
         const creditCheck = await checkCreditLimit(req.body.customer, balanceDue);
         if (!creditCheck.allowed) {
           throw new ApiError(400, creditCheck.message || 'Credit limit exceeded');
@@ -163,8 +187,10 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       }
     }
 
+    phase = 'generate-invoice-number';
     const invoiceNumber = await generateDocumentNumber('INV', Sale, 'invoiceNumber', session);
     const isPos = req.body.isPos ?? true;
+    phase = 'create-sale-document';
 
     const sale = await Sale.create(
       [{
@@ -194,8 +220,9 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     );
 
     const saleId = sale[0]._id.toString();
-    const userId = req.user!._id.toString();
+    const saleUserId = req.user!._id.toString();
     const userName = req.user!.name;
+    phase = 'deduct-stock';
 
     await deductStockBatch(
       req.body.items.map((item: { product: string; quantity: number }) => ({
@@ -203,7 +230,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
         quantity: item.quantity,
       })),
       {
-        userId,
+        userId: saleUserId,
         reference: invoiceNumber,
         referenceId: saleId,
         referenceModel: 'Sale',
@@ -211,10 +238,11 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       }
     );
 
+    phase = 'ledger-update';
     if (req.body.customer && customerDoc?.creditTermType === CreditTermType.LONG_TERM) {
-      await postSaleLedger(saleId, userId, userName, session);
+      await postSaleLedger(saleId, saleUserId, userName, session);
     } else if (balanceDue > 0 && req.body.customer) {
-      await postSaleLedger(saleId, userId, userName, session);
+      await postSaleLedger(saleId, saleUserId, userName, session);
     } else if (req.body.customer) {
       await Customer.findByIdAndUpdate(
         req.body.customer,
@@ -223,6 +251,7 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       );
     }
 
+    phase = 'commit-transaction';
     await session.commitTransaction();
     committed = true;
 
@@ -237,11 +266,32 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       console.warn(`[sale] Audit log failed for ${saleId}:`, err);
     });
 
+    saleLog('SUCCESS', {
+      saleId,
+      invoiceNumber,
+      total,
+      paidAmount,
+      balanceDue,
+      durationMs: Date.now() - startedAt,
+    });
+
     ApiResponse.success(res, sale[0], 'Sale completed', 201);
   } catch (error) {
+    saleErrorLog(error, { ...debugContext, phase, committed });
+
     if (!committed) {
-      await session.abortTransaction();
+      try {
+        await session.abortTransaction();
+      } catch (abortError) {
+        saleErrorLog(abortError, { ...debugContext, phase: 'abort-transaction', committed });
+      }
     }
+
+    if (isDevDiagnosticsEnabled() && !(error instanceof ApiError)) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      throw new ApiError(500, err.message, [{ field: phase, message: err.stack || err.message }]);
+    }
+
     throw error;
   } finally {
     session.endSession();
