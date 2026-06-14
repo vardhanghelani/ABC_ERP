@@ -57,6 +57,8 @@ export interface ISale extends Document {
   status: SaleStatus;
   notes?: string;
   isPos: boolean;
+  idempotencyKey?: string;
+  posFingerprint?: string;
   createdBy: mongoose.Types.ObjectId;
 }
 
@@ -101,6 +103,8 @@ const saleSchema = new Schema<ISale>(
     status: { type: String, enum: Object.values(SaleStatus), default: SaleStatus.COMPLETED },
     notes: { type: String },
     isPos: { type: Boolean, default: true },
+    idempotencyKey: { type: String },
+    posFingerprint: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }
@@ -109,5 +113,7 @@ const saleSchema = new Schema<ISale>(
 saleSchema.index({ createdAt: -1 });
 saleSchema.index({ customer: 1, balanceDue: 1 });
 saleSchema.index({ dueDate: 1, balanceDue: 1 });
+saleSchema.index({ createdBy: 1, posFingerprint: 1, createdAt: -1 });
+saleSchema.index({ idempotencyKey: 1, createdBy: 1 }, { unique: true, sparse: true });
 
 export const Sale = mongoose.model<ISale>('Sale', saleSchema);

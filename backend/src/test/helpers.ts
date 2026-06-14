@@ -27,6 +27,7 @@ import {
 } from '../services/ledgerService';
 import { runReconciliation } from '../services/reconciliationService';
 import { UserRole } from '../utils/permissions';
+import crypto from 'crypto';
 import { createSale, cancelSale } from '../controllers/saleController';
 import { createPurchase, receivePurchase } from '../controllers/purchaseController';
 import { receiveCustomerPayment, makeSupplierPayment } from '../controllers/creditController';
@@ -172,6 +173,7 @@ export async function createTestSale(
       items: [{ product: ctx.product._id.toString(), quantity, unitPrice }],
       payments: options.payments,
       isPos: true,
+      idempotencyKey: crypto.randomUUID(),
     },
   });
   expect(statusCode).toBe(201);

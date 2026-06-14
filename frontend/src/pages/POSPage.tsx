@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchApi, postApi, downloadAuthenticated } from '@/lib/api'
@@ -25,7 +25,15 @@ import { Alert } from '@/components/ui/alert'
 import { StockBarInline } from '@/components/ui/stock-bar'
 import { formatCurrency, getAmountDue } from '@/lib/utils'
 import { calculatePosTotals, parseMoneyInput } from '@/lib/posTotals'
-import { Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
+import {
+  clearPosIdempotencyKey,
+  getOrCreatePosIdempotencyKey,
+  isPosSubmitLocked,
+  lockPosSubmit,
+  reconcilePosSubmitLock,
+  unlockPosSubmit,
+} from '@/lib/posSaleSubmit'
+import { Loader2, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface CartItem extends PosCartLine {}
@@ -48,20 +56,23 @@ export default function POSPage() {
   const [paidAmount, setPaidAmount] = useState(0)
   const [lastSaleId, setLastSaleId] = useState<string | null>(null)
   const saleSubmittingRef = useRef(false)
-  const saleIdempotencyKeyRef = useRef<string | null>(null)
+  const inFlightSaleRef = useRef<Promise<{ invoiceNumber: string; _id: string }> | null>(null)
+  const cartSnapshotRef = useRef<{
+    cart: CartItem[]
+    qtyDrafts: Record<string, string>
+    discountInput: string
+    taxRateInput: string
+    paidAmount: number
+    paymentMode: PaymentMode
+    paymentMethod: string
+    selectedCustomer: Customer | null
+  } | null>(null)
+  const [saleLocked, setSaleLocked] = useState(false)
 
-  const getSaleIdempotencyKey = useCallback(() => {
-    if (!saleIdempotencyKeyRef.current) {
-      saleIdempotencyKeyRef.current = crypto.randomUUID()
-    }
-    return saleIdempotencyKeyRef.current
+  useEffect(() => {
+    reconcilePosSubmitLock()
+    searchRef.current?.focus()
   }, [])
-
-  const resetSaleIdempotencyKey = useCallback(() => {
-    saleIdempotencyKeyRef.current = null
-  }, [])
-
-  useEffect(() => { searchRef.current?.focus() }, [])
 
   const { data: searchResults = [] } = useQuery({
     queryKey: ['pos-search', debouncedSearch],
@@ -206,9 +217,20 @@ export default function POSPage() {
   const change = Math.max(0, paidNow - totals.total)
   const isCreditSale = onAccount > 0
 
-  const buildPayments = () => {
-    if (paidNow > 0) return [{ method: paymentMethod, amount: paidNow }]
-    return [{ method: 'credit', amount: 0 }]
+  const buildPaymentsFromSnapshot = (snapshot: NonNullable<typeof cartSnapshotRef.current>) => {
+    const snapTotals = calculatePosTotals({
+      cart: snapshot.cart,
+      billDiscount: parseMoneyInput(snapshot.discountInput),
+      taxRate: parseMoneyInput(snapshot.taxRateInput),
+    })
+    const snapPaidNow = snapshot.paymentMode === 'credit'
+      ? 0
+      : snapshot.paymentMode === 'full'
+        ? snapTotals.total
+        : snapshot.paidAmount
+    return snapPaidNow > 0
+      ? [{ method: snapshot.paymentMethod, amount: snapPaidNow }]
+      : [{ method: 'credit', amount: 0 }]
   }
 
   const cartValid = cart.length > 0 && cart.every((i) => i.quantity >= getMinimumBunch(i.product))
@@ -223,8 +245,15 @@ export default function POSPage() {
   const canComplete = cartValid && paymentValid && creditOk
 
   const completeSale = useMutation({
-    mutationFn: () => {
-      for (const item of cart) {
+    mutationFn: async () => {
+      if (inFlightSaleRef.current) return inFlightSaleRef.current
+
+      const snapshot = cartSnapshotRef.current
+      if (!snapshot || snapshot.cart.length === 0) {
+        throw new Error('Cart is empty')
+      }
+
+      for (const item of snapshot.cart) {
         const step = getMinimumBunch(item.product)
         const qty = snapToBunch(item.quantity, step)
         if (qty % step !== 0) {
@@ -235,29 +264,49 @@ export default function POSPage() {
         }
       }
 
-      const payments = buildPayments()
-      return postApi<{ invoiceNumber: string; _id: string }>(
+      const snapCustomerId = snapshot.selectedCustomer?._id ?? ''
+      const snapTotals = calculatePosTotals({
+        cart: snapshot.cart,
+        billDiscount: parseMoneyInput(snapshot.discountInput),
+        taxRate: parseMoneyInput(snapshot.taxRateInput),
+      })
+      const payments = buildPaymentsFromSnapshot(snapshot)
+
+      const idempotencyKey = getOrCreatePosIdempotencyKey()
+      const payload = {
+        customer: snapCustomerId || undefined,
+        items: snapshot.cart.map((i) => ({
+          product: getProductId(i.product),
+          quantity: snapToBunch(i.quantity, getMinimumBunch(i.product)),
+          unitPrice: i.unitPrice,
+          discount: i.discount,
+        })),
+        discount: snapTotals.billDiscount,
+        discountType: 'fixed' as const,
+        taxRate: parseMoneyInput(snapshot.taxRateInput),
+        payments,
+        isPos: true,
+      }
+
+      const request = postApi<{ invoiceNumber: string; _id: string }>(
         '/sales',
-        {
-          customer: customerId || undefined,
-          items: cart.map((i) => ({
-            product: getProductId(i.product),
-            quantity: snapToBunch(i.quantity, getMinimumBunch(i.product)),
-            unitPrice: i.unitPrice,
-            discount: i.discount,
-          })),
-          discount: totals.billDiscount,
-          discountType: 'fixed',
-          taxRate: parseMoneyInput(taxRateInput),
-          payments,
-          isPos: true,
-        },
-        { idempotencyKey: getSaleIdempotencyKey() }
+        payload,
+        { idempotencyKey }
       )
+      inFlightSaleRef.current = request
+      try {
+        return await request
+      } finally {
+        inFlightSaleRef.current = null
+      }
     },
+    retry: false,
     onSuccess: (data) => {
-      resetSaleIdempotencyKey()
+      cartSnapshotRef.current = null
+      clearPosIdempotencyKey()
+      unlockPosSubmit()
       saleSubmittingRef.current = false
+      setSaleLocked(false)
       setLastSaleId(data._id)
       setCart([])
       setQtyDrafts({})
@@ -266,21 +315,58 @@ export default function POSPage() {
       setPaidAmount(0)
       setPaymentMode('full')
       setSelectedCustomer(null)
-      toast.success(
-        isCreditSale
-          ? `Sale done! ${paidNow > 0 ? `${formatCurrency(paidNow)} paid, ` : ''}${formatCurrency(onAccount)} on ${isLongTermAcc ? 'account' : 'credit'}.`
-          : `Sale completed! ${data.invoiceNumber}`
-      )
+      toast.success(`Sale completed! ${data.invoiceNumber}`)
     },
     onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
+      if (cartSnapshotRef.current) {
+        setCart(cartSnapshotRef.current.cart)
+        setQtyDrafts(cartSnapshotRef.current.qtyDrafts)
+        setDiscountInput(cartSnapshotRef.current.discountInput)
+        setTaxRateInput(cartSnapshotRef.current.taxRateInput)
+        setPaidAmount(cartSnapshotRef.current.paidAmount)
+        setPaymentMode(cartSnapshotRef.current.paymentMode)
+        setSelectedCustomer(cartSnapshotRef.current.selectedCustomer)
+        cartSnapshotRef.current = null
+      }
+      unlockPosSubmit()
       saleSubmittingRef.current = false
+      setSaleLocked(false)
       toast.error(err.response?.data?.message || err.message || 'Sale failed')
     },
   })
 
   const handleCompleteSale = () => {
-    if (saleSubmittingRef.current || completeSale.isPending || !canComplete) return
+    if (
+      saleSubmittingRef.current
+      || saleLocked
+      || isPosSubmitLocked()
+      || completeSale.isPending
+      || inFlightSaleRef.current
+      || !canComplete
+    ) {
+      return
+    }
+
+    cartSnapshotRef.current = {
+      cart: [...cart],
+      qtyDrafts: { ...qtyDrafts },
+      discountInput,
+      taxRateInput,
+      paidAmount,
+      paymentMode,
+      paymentMethod,
+      selectedCustomer,
+    }
+
     saleSubmittingRef.current = true
+    lockPosSubmit()
+    setSaleLocked(true)
+    getOrCreatePosIdempotencyKey()
+
+    // Empty cart immediately so repeat clicks cannot resubmit the same sale
+    setCart([])
+    setQtyDrafts({})
+
     completeSale.mutate()
   }
 
@@ -300,7 +386,16 @@ export default function POSPage() {
   }
 
   return (
-    <div className="space-y-4 no-print">
+    <div className="relative space-y-4 no-print">
+      {saleLocked && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+          <div className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-bg-surface)] px-8 py-6 shadow-[var(--shadow-lg)]">
+            <Loader2 className="h-10 w-10 animate-spin text-[var(--color-accent)]" />
+            <p className="font-semibold text-[var(--color-text-primary)]">Processing sale…</p>
+            <p className="text-[var(--text-sm)] text-[var(--color-text-muted)]">Do not click again or refresh</p>
+          </div>
+        </div>
+      )}
       <PageHeader
         title="Point of Sale"
         description="Sell by minimum bunch — quantity steps in packet sizes (1K, 2K, etc.)"
@@ -593,10 +688,11 @@ export default function POSPage() {
               )}
 
               <Button
+                type="button"
                 className="w-full shadow-[var(--shadow-lg)] ring-2 ring-[var(--color-accent)]/25"
                 size="lg"
-                disabled={!canComplete || completeSale.isPending}
-                loading={completeSale.isPending}
+                disabled={!canComplete || saleLocked || completeSale.isPending}
+                loading={saleLocked || completeSale.isPending}
                 onClick={handleCompleteSale}
               >
                 {completeButtonLabel()}

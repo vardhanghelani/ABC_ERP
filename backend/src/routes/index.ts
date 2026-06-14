@@ -23,6 +23,7 @@ import * as reconciliation from '../controllers/reconciliationController';
 import { upload } from '../middleware/upload';
 import { loginRateLimit } from '../middleware/loginRateLimit';
 import { refreshRateLimit } from '../middleware/refreshRateLimit';
+import { saleCreateRateLimit } from '../middleware/saleRateLimit';
 
 const router = Router();
 
@@ -112,7 +113,7 @@ router.post('/purchases/:id/cancel', authenticate, authorize(PERMISSIONS.PURCHAS
 // Sales & POS
 router.get('/sales', authenticate, authorize(PERMISSIONS.SALES_VIEW), sale.getSales);
 router.get('/sales/:id', authenticate, authorize(PERMISSIONS.SALES_VIEW), sale.getSale);
-router.post('/sales', authenticate, authorize(PERMISSIONS.SALES_CREATE, PERMISSIONS.POS_ACCESS), validate(sale.saleSchema), sale.createSale);
+router.post('/sales', authenticate, authorize(PERMISSIONS.SALES_CREATE, PERMISSIONS.POS_ACCESS), saleCreateRateLimit, validate(sale.saleSchema), sale.createSale);
 router.post('/sales/:id/cancel', authenticate, authorize(PERMISSIONS.SALES_CREATE), sale.cancelSale);
 router.get('/sales/:id/pdf', authenticate, authorize(PERMISSIONS.SALES_VIEW), sale.downloadInvoicePDF);
 

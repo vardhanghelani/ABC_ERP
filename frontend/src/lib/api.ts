@@ -62,7 +62,11 @@ export async function postApi<T>(
   const headers = options?.idempotencyKey
     ? { 'Idempotency-Key': options.idempotencyKey }
     : undefined
-  const { data } = await api.post<ApiResponse<T>>(url, body, { headers })
+  const { data } = await api.post<ApiResponse<T>>(url, body, {
+    headers,
+    // Never allow axios-level retries for mutations
+    validateStatus: (status) => status >= 200 && status < 300,
+  })
   return data.data
 }
 

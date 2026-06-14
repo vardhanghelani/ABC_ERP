@@ -30,6 +30,17 @@ import {
   failSaleIdempotency,
   loadIdempotentSale,
 } from '../services/saleIdempotencyService';
+import {
+  buildPosSaleFingerprint,
+  findRecentDuplicatePosSale,
+} from '../services/saleDuplicateGuard';
+import {
+  acquireUserSaleLock,
+  releaseUserSaleLock,
+  findExistingPosSale,
+  claimPosSaleFingerprint,
+} from '../services/saleCreationGuard';
+import type { ISale } from '../models/Sale';
 
 const saleItemSchema = z.object({
   product: z.string(),
@@ -84,11 +95,29 @@ export const getSale = asyncHandler(async (req: AuthRequest, res: Response) => {
 
 export const createSale = asyncHandler(async (req: AuthRequest, res: Response) => {
   const startedAt = Date.now();
-  const userId = req.user?._id?.toString();
+  const userId = req.user!._id.toString();
   const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
     || (req.body.idempotencyKey as string | undefined)?.trim();
+  const isPosRequest = req.body.isPos ?? true;
+  let userLockHeld = false;
 
-  const idempotency = await beginSaleIdempotency(userId!, idempotencyKey);
+  const finishWithExistingSale = async (existing: ISale, reason: string) => {
+    await completeSaleIdempotency(userId, idempotencyKey, existing._id.toString());
+    saleLog('SUCCESS', {
+      saleId: existing._id.toString(),
+      invoiceNumber: existing.invoiceNumber,
+      duplicateBlocked: true,
+      reason,
+      durationMs: Date.now() - startedAt,
+    });
+    return ApiResponse.success(res, existing, 'Sale completed', 201);
+  };
+
+  if (isPosRequest && process.env.NODE_ENV !== 'test' && (!idempotencyKey || idempotencyKey.length < 8)) {
+    throw new ApiError(400, 'POS sale requires Idempotency-Key. Please refresh the page and try again.');
+  }
+
+  const idempotency = await beginSaleIdempotency(userId, idempotencyKey);
   if (idempotency.resumeSaleId) {
     const existingSale = await loadIdempotentSale(idempotency.resumeSaleId);
     saleLog('SUCCESS', {
@@ -98,6 +127,11 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       durationMs: Date.now() - startedAt,
     });
     return ApiResponse.success(res, existingSale, 'Sale completed', 201);
+  }
+
+  if (isPosRequest && idempotencyKey && process.env.NODE_ENV !== 'test') {
+    await acquireUserSaleLock(userId, idempotencyKey);
+    userLockHeld = true;
   }
 
   const debugContext = {
@@ -226,8 +260,25 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
     }
 
     phase = 'generate-invoice-number';
+    const isPos = isPosRequest;
+    let posFingerprint: string | undefined;
+
+    if (isPos && process.env.NODE_ENV !== 'test') {
+      phase = 'duplicate-check';
+      posFingerprint = buildPosSaleFingerprint(userId!, {
+        customer: req.body.customer,
+        items: req.body.items,
+        total,
+        paidAmount,
+      });
+      const duplicate = await findExistingPosSale(userId, posFingerprint, session);
+      if (duplicate) {
+        await session.abortTransaction();
+        return finishWithExistingSale(duplicate, 'pre-check-fingerprint');
+      }
+    }
+
     const invoiceNumber = await generateDocumentNumber('INV', Sale, 'invoiceNumber', session);
-    const isPos = req.body.isPos ?? true;
     phase = 'create-sale-document';
 
     const sale = await Sale.create(
@@ -252,12 +303,26 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
         status: SaleStatus.COMPLETED,
         notes: req.body.notes,
         isPos,
+        idempotencyKey: idempotencyKey || undefined,
+        posFingerprint,
         createdBy: req.user!._id,
       }],
       { session }
     );
 
     const saleId = sale[0]._id.toString();
+
+    if (isPos && posFingerprint && process.env.NODE_ENV !== 'test') {
+      phase = 'claim-fingerprint';
+      const claim = await claimPosSaleFingerprint(userId, posFingerprint, saleId, session);
+      if (!claim.claimed) {
+        await session.abortTransaction();
+        const existing = await Sale.findById(claim.existingSaleId);
+        if (!existing) throw new ApiError(409, 'Duplicate sale detected but original invoice was not found');
+        return finishWithExistingSale(existing, 'fingerprint-race');
+      }
+    }
+
     const saleUserId = req.user!._id.toString();
     const userName = req.user!.name;
     phase = 'deduct-stock';
@@ -334,11 +399,11 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
       durationMs: Date.now() - startedAt,
     });
 
-    await completeSaleIdempotency(userId!, idempotencyKey, saleId);
+    await completeSaleIdempotency(userId, idempotencyKey, saleId);
 
     ApiResponse.success(res, sale[0], 'Sale completed', 201);
   } catch (error) {
-    await failSaleIdempotency(userId!, idempotencyKey);
+    await failSaleIdempotency(userId, idempotencyKey);
     saleErrorLog(error, { ...debugContext, phase, committed });
 
     if (!committed) {
@@ -356,6 +421,9 @@ export const createSale = asyncHandler(async (req: AuthRequest, res: Response) =
 
     throw error;
   } finally {
+    if (userLockHeld) {
+      await releaseUserSaleLock(userId, idempotencyKey).catch(() => {});
+    }
     session.endSession();
   }
 });
