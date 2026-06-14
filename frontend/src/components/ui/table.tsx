@@ -94,15 +94,20 @@ export function TableCell({
   className,
   mono,
   align = 'left',
+  colSpan,
 }: {
   children?: React.ReactNode
   className?: string
   mono?: boolean
   align?: 'left' | 'right' | 'center'
+  colSpan?: number
 }) {
   const alignClass = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
   return (
-    <td className={cn('px-4 py-3 text-[var(--text-base)] text-[var(--color-text-primary)]', mono && 'font-data', alignClass, className)}>
+    <td
+      colSpan={colSpan}
+      className={cn('px-4 py-3 text-[var(--text-base)] text-[var(--color-text-primary)]', mono && 'font-data', alignClass, className)}
+    >
       {children}
     </td>
   )

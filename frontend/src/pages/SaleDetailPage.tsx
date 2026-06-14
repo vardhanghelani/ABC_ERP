@@ -197,16 +197,16 @@ export default function SaleDetailPage() {
                 <dt className="text-[var(--color-text-muted)]">Paid</dt>
                 <dd className="font-mono text-[var(--color-success)]">{formatCurrency(sale.paidAmount)}</dd>
               </div>
-              {sale.balanceDue > 0 && (
+              {(sale.balanceDue ?? 0) > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-[var(--color-text-muted)]">Balance Due</dt>
-                  <dd className="font-mono text-[var(--color-warning)]">{formatCurrency(sale.balanceDue)}</dd>
+                  <dd className="font-mono text-[var(--color-warning)]">{formatCurrency(sale.balanceDue ?? 0)}</dd>
                 </div>
               )}
-              {sale.changeAmount > 0 && (
+              {(sale.changeAmount ?? 0) > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-[var(--color-text-muted)]">Change</dt>
-                  <dd className="font-mono">{formatCurrency(sale.changeAmount)}</dd>
+                  <dd className="font-mono">{formatCurrency(sale.changeAmount ?? 0)}</dd>
                 </div>
               )}
             </dl>
