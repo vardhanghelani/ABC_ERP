@@ -39,6 +39,14 @@ function roundLedgerAmount(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100) / 100;
 }
 
+/** Amount customer actually owes after advance credit: gross outstanding − advance. */
+export const computeNetOutstanding = (outstandingAmount: number, advanceBalance = 0): number =>
+  roundLedgerAmount(outstandingAmount - advanceBalance);
+
+/** Net amount due for UI/collections — never negative. */
+export const computeAmountDue = (outstandingAmount: number, advanceBalance = 0): number =>
+  Math.max(0, computeNetOutstanding(outstandingAmount, advanceBalance));
+
 /** Latest passbook balance — must follow insert order, not back-dated `date`. */
 export const getLastBalance = async (
   entityType: LedgerEntityType,
@@ -110,27 +118,29 @@ export const checkCreditLimit = async (
   const customer = await Customer.findById(customerId);
   if (!customer) throw new ApiError(404, 'Customer not found');
 
-  const newOutstanding = customer.outstandingAmount + additionalAmount;
-  const availableCredit = Math.max(0, customer.creditLimit - customer.outstandingAmount);
+  const netOutstanding = computeNetOutstanding(customer.outstandingAmount, customer.advanceBalance);
+  const amountDue = computeAmountDue(customer.outstandingAmount, customer.advanceBalance);
+  const newNetOutstanding = netOutstanding + additionalAmount;
+  const availableCredit = Math.max(0, customer.creditLimit - amountDue);
 
-  if (customer.creditLimit > 0 && newOutstanding > customer.creditLimit) {
+  if (customer.creditLimit > 0 && newNetOutstanding > customer.creditLimit) {
     if (customer.blockOnCreditLimit) {
       return {
         allowed: false,
         warning: true,
-        message: `Credit limit exceeded. Limit: ₹${customer.creditLimit}, Outstanding would be: ₹${newOutstanding}`,
+        message: `Credit limit exceeded. Limit: ₹${customer.creditLimit}, Net outstanding would be: ₹${newNetOutstanding}`,
         availableCredit,
       };
     }
     return {
       allowed: true,
       warning: true,
-      message: `Warning: Credit limit will be exceeded (${((newOutstanding / customer.creditLimit) * 100).toFixed(0)}% used)`,
+      message: `Warning: Credit limit will be exceeded (${((newNetOutstanding / customer.creditLimit) * 100).toFixed(0)}% used)`,
       availableCredit,
     };
   }
 
-  const usagePercent = customer.creditLimit > 0 ? (newOutstanding / customer.creditLimit) * 100 : 0;
+  const usagePercent = customer.creditLimit > 0 ? (amountDue / customer.creditLimit) * 100 : 0;
   return {
     allowed: true,
     warning: usagePercent >= 80,
@@ -147,7 +157,8 @@ export const calculateRiskScore = async (customerId: string): Promise<{ score: n
 
   // Outstanding vs credit limit
   if (customer.creditLimit > 0) {
-    const usage = (customer.outstandingAmount / customer.creditLimit) * 100;
+    const amountDue = computeAmountDue(customer.outstandingAmount, customer.advanceBalance);
+    const usage = (amountDue / customer.creditLimit) * 100;
     if (usage > 100) score += 40;
     else if (usage > 80) score += 25;
     else if (usage > 50) score += 10;
@@ -216,9 +227,10 @@ export const getCustomerSummary = async (
   const overdueInvoices = pendingInvoices.filter((s) => s.dueDate && s.dueDate < now);
   const overdueAmount = overdueInvoices.reduce((sum, s) => sum + s.balanceDue, 0);
 
-  const availableCredit = Math.max(0, customer.creditLimit - customer.outstandingAmount);
+  const amountDue = computeAmountDue(customer.outstandingAmount, customer.advanceBalance);
+  const availableCredit = Math.max(0, customer.creditLimit - amountDue);
   const creditUsagePercent = customer.creditLimit > 0
-    ? (customer.outstandingAmount / customer.creditLimit) * 100
+    ? (amountDue / customer.creditLimit) * 100
     : 0;
 
   let ledgerInSync: boolean | undefined;
@@ -229,7 +241,8 @@ export const getCustomerSummary = async (
   return {
     customer,
     currentOutstanding: customer.outstandingAmount,
-    netOutstanding: roundLedgerAmount(customer.outstandingAmount - customer.advanceBalance),
+    netOutstanding: computeNetOutstanding(customer.outstandingAmount, customer.advanceBalance),
+    amountDue,
     totalPurchases: customer.totalPurchases,
     totalPayments: customer.totalPayments,
     pendingInvoices: pendingInvoices.length,
@@ -789,11 +802,13 @@ export const getAgingReport = async (entityType: LedgerEntityType = LedgerEntity
 };
 
 export const getOutstandingReport = async () => {
-  const [customers, totalReceivables, totalOverdue, invoiceWise] = await Promise.all([
-    Customer.find({ outstandingAmount: { $gt: 0 }, isActive: true })
-      .sort({ outstandingAmount: -1 })
-      .select('name phone outstandingAmount creditLimit riskCategory lastPaymentDate'),
-    Customer.aggregate([{ $group: { _id: null, total: { $sum: '$outstandingAmount' } } }]),
+  const [customers, totalOverdue, invoiceWise] = await Promise.all([
+    Customer.find({
+      isActive: true,
+      $expr: { $gt: [{ $subtract: ['$outstandingAmount', '$advanceBalance'] }, 0] },
+    })
+      .select('name phone outstandingAmount advanceBalance creditLimit riskCategory lastPaymentDate')
+      .lean(),
     Sale.aggregate([
       { $match: { balanceDue: { $gt: 0 }, status: SaleStatus.COMPLETED, dueDate: { $lt: new Date() } } },
       { $group: { _id: null, total: { $sum: '$balanceDue' } } },
@@ -804,10 +819,19 @@ export const getOutstandingReport = async () => {
       .limit(100),
   ]);
 
+  const customerWise = customers
+    .map((c) => ({
+      ...c,
+      netOutstanding: computeAmountDue(c.outstandingAmount, c.advanceBalance ?? 0),
+    }))
+    .sort((a, b) => b.netOutstanding - a.netOutstanding);
+
+  const totalReceivables = customerWise.reduce((sum, c) => sum + c.netOutstanding, 0);
+
   return {
-    totalReceivables: totalReceivables[0]?.total || 0,
+    totalReceivables,
     totalOverdue: totalOverdue[0]?.total || 0,
-    customerWise: customers,
+    customerWise,
     invoiceWise: invoiceWise.map((s) => ({
       invoiceNumber: s.invoiceNumber,
       customer: s.customer,
@@ -832,14 +856,31 @@ export const getCreditDashboard = async () => {
     monthCollections,
     topOutstanding,
   ] = await Promise.all([
-    Customer.aggregate([{ $group: { _id: null, total: { $sum: '$outstandingAmount' } } }]),
+    Customer.aggregate([
+      {
+        $project: {
+          netDue: {
+            $max: [0, { $subtract: ['$outstandingAmount', '$advanceBalance'] }],
+          },
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$netDue' } } },
+    ]),
     Supplier.aggregate([{ $group: { _id: null, total: { $sum: '$outstandingAmount' } } }]),
-    Customer.countDocuments({ outstandingAmount: { $gt: 0 }, isActive: true }),
+    Customer.countDocuments({
+      isActive: true,
+      $expr: { $gt: [{ $subtract: ['$outstandingAmount', '$advanceBalance'] }, 0] },
+    }),
     Customer.find({
       isActive: true,
       creditLimit: { $gt: 0 },
-      $expr: { $gte: ['$outstandingAmount', { $multiply: ['$creditLimit', 0.8] }] },
-    }).limit(10).select('name outstandingAmount creditLimit'),
+      $expr: {
+        $gte: [
+          { $max: [0, { $subtract: ['$outstandingAmount', '$advanceBalance'] }] },
+          { $multiply: ['$creditLimit', 0.8] },
+        ],
+      },
+    }).limit(10).select('name outstandingAmount advanceBalance creditLimit'),
     Payment.aggregate([
       { $match: { type: PaymentType.RECEIPT, date: { $gte: todayStart }, isVoided: false } },
       { $group: { _id: null, total: { $sum: '$amount' } } },
@@ -848,11 +889,21 @@ export const getCreditDashboard = async () => {
       { $match: { type: PaymentType.RECEIPT, date: { $gte: monthStart }, isVoided: false } },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]),
-    Customer.find({ outstandingAmount: { $gt: 0 } })
-      .sort({ outstandingAmount: -1 })
-      .limit(5)
-      .select('name phone outstandingAmount riskCategory'),
+    Customer.find({
+      isActive: true,
+      $expr: { $gt: [{ $subtract: ['$outstandingAmount', '$advanceBalance'] }, 0] },
+    })
+      .select('name phone outstandingAmount advanceBalance riskCategory')
+      .lean(),
   ]);
+
+  const largestOutstanding = topOutstanding
+    .map((c) => ({
+      ...c,
+      netOutstanding: computeAmountDue(c.outstandingAmount, c.advanceBalance ?? 0),
+    }))
+    .sort((a, b) => b.netOutstanding - a.netOutstanding)
+    .slice(0, 5);
 
   return {
     totalReceivables: receivables[0]?.total || 0,
@@ -861,7 +912,7 @@ export const getCreditDashboard = async () => {
     nearLimitCustomers,
     todayCollections: todayCollections[0]?.total || 0,
     monthCollections: monthCollections[0]?.total || 0,
-    largestOutstanding: topOutstanding,
+    largestOutstanding,
   };
 };
 
@@ -891,7 +942,7 @@ export const generateStatementPDF = async (
       doc.text(`Statement Date: ${new Date().toLocaleDateString('en-IN')}`);
       doc.moveDown();
 
-      doc.text(`Opening Outstanding: ₹${summary.currentOutstanding.toFixed(2)}`);
+      doc.text(`Net Outstanding: ₹${summary.netOutstanding.toFixed(2)}`);
       doc.text(`Total Purchases: ₹${summary.totalPurchases.toFixed(2)}`);
       doc.text(`Total Payments: ₹${summary.totalPayments.toFixed(2)}`);
       doc.text(`Overdue Amount: ₹${summary.overdueAmount.toFixed(2)}`);

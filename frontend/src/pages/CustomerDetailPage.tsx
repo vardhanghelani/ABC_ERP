@@ -17,7 +17,7 @@ import { PageSkeleton } from '@/components/ui/skeleton'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, getAmountDue } from '@/lib/utils'
 import {
   IndianRupee, Download, MessageCircle, AlertTriangle,
   CreditCard, TrendingUp, Shield,
@@ -75,7 +75,7 @@ export default function CustomerDetailPage() {
   const { customer } = summary
   const ledger: LedgerEntry[] = ledgerData?.data || []
   const riskVariant = RISK_VARIANTS[summary.riskCategory || 'low'] || 'muted'
-  const netLedgerBalance = summary.netOutstanding ?? (summary.currentOutstanding - summary.advanceBalance)
+  const amountDue = summary.amountDue ?? getAmountDue(summary.currentOutstanding, summary.advanceBalance)
   const lastLedgerBalance = ledger.length > 0 ? ledger[ledger.length - 1].runningBalance : 0
 
   return (
@@ -112,39 +112,25 @@ export default function CustomerDetailPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Net Outstanding"
-          value={formatCurrency(netLedgerBalance)}
+          value={formatCurrency(amountDue)}
           icon={IndianRupee}
-          accent={netLedgerBalance > 0 ? 'warning' : 'success'}
-          hint="Actual receivable after adjusting advance balance (Outstanding − Advance)."
-        />
-        <StatCard
-          label="Outstanding"
-          value={formatCurrency(summary.currentOutstanding)}
-          icon={IndianRupee}
-          accent={summary.currentOutstanding > 0 ? 'warning' : 'accent'}
-          hint="Total unpaid amount still on invoices."
+          accent={amountDue > 0 ? 'warning' : 'success'}
+          hint="What the customer actually owes today (unpaid invoices minus advance on account)."
         />
         <StatCard label="Overdue" value={formatCurrency(summary.overdueAmount)} icon={AlertTriangle} accent={summary.overdueAmount > 0 ? 'danger' : 'success'} />
         <StatCard label="Available Credit" value={formatCurrency(summary.availableCredit)} icon={CreditCard} accent="info" />
-        <StatCard
-          label="Advance Balance"
-          value={formatCurrency(summary.advanceBalance)}
-          icon={TrendingUp}
-          accent="success"
-          hint="Money received from customer not yet applied to invoices."
-        />
+        <StatCard label="Credit Used" value={`${summary.creditUsagePercent.toFixed(0)}%`} icon={TrendingUp} accent={summary.creditUsagePercent >= 80 ? 'warning' : 'accent'} />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {[
           { label: 'Total Purchases', value: formatCurrency(summary.totalPurchases) },
           { label: 'Total Payments', value: formatCurrency(summary.totalPayments) },
-          { label: 'Credit Limit', value: formatCurrency(summary.creditLimit) },
-          { label: 'Credit Used', value: `${summary.creditUsagePercent.toFixed(0)}%` },
           { label: 'Pending Invoices', value: String(summary.pendingInvoices) },
+          { label: 'Credit Limit', value: formatCurrency(summary.creditLimit) },
           { label: 'Credit Type', value: summary.creditTermLabel || (summary.creditTermType === 'long_term' ? 'Long Term (ACC)' : 'Short Term') },
         ].map(({ label, value }) => (
           <Card key={label} className="p-4">
@@ -171,7 +157,7 @@ export default function CustomerDetailPage() {
         <Card className="overflow-hidden">
           <div className="border-b border-[var(--color-border-soft)] px-4 py-3 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
             Entries shown in the order they were recorded. Debits (invoices) increase balance owed; credits (payments) reduce it.
-            Net balance = Outstanding ({formatCurrency(summary.currentOutstanding)}) − Advance ({formatCurrency(summary.advanceBalance)}) = {formatCurrency(netLedgerBalance)}.
+            Closing balance = net outstanding ({formatCurrency(amountDue)}).
           </div>
           <DataTableWrapper loading={ledgerLoading} empty={!ledgerLoading && ledger.length === 0} emptyTitle="No ledger entries yet">
             <div className="max-h-[500px] overflow-auto">
@@ -208,10 +194,10 @@ export default function CustomerDetailPage() {
                   ))}
                   {ledger.length > 0 && (
                     <TableRow className="bg-[var(--color-surface-muted)]/60 font-semibold">
-                      <TableCell colSpan={5} align="right">Closing balance (net owed after advance)</TableCell>
+                      <TableCell colSpan={5} align="right">Closing balance (net outstanding)</TableCell>
                       <TableCell align="right" mono>{formatCurrency(lastLedgerBalance)}</TableCell>
                       <TableCell colSpan={2} className="text-[var(--text-xs)] text-[var(--color-text-muted)]">
-                        Should match {formatCurrency(netLedgerBalance)}
+                        Should match {formatCurrency(amountDue)}
                       </TableCell>
                     </TableRow>
                   )}
@@ -269,10 +255,20 @@ export default function CustomerDetailPage() {
         }
       >
         <p className="mb-4 text-[var(--text-sm)] text-[var(--color-text-muted)]">
-          Payment-only visit — customer pays without buying anything.
+          Net outstanding: <strong>{formatCurrency(amountDue)}</strong>. Payment applies to invoices first; any extra is stored as advance.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><Label>Amount *</Label><Input type="number" value={paymentForm.amount || ''} onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })} /></div>
+          <div>
+            <Label>Amount *</Label>
+            <div className="flex gap-2">
+              <Input type="number" value={paymentForm.amount || ''} onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })} />
+              {amountDue > 0 && (
+                <Button type="button" variant="secondary" onClick={() => setPaymentForm({ ...paymentForm, amount: amountDue, isAdvance: false })}>
+                  Full
+                </Button>
+              )}
+            </div>
+          </div>
           <div>
             <Label>Payment Mode</Label>
             <Select value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}>

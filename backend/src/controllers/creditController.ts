@@ -40,6 +40,8 @@ import {
   markBadDebt,
   validateCustomerLedgerBalance,
   validateSupplierLedgerBalance,
+  computeAmountDue,
+  computeNetOutstanding,
 } from '../services/ledgerService';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
@@ -87,9 +89,14 @@ export const getCustomerPaymentContext = asyncHandler(async (req: AuthRequest, r
 
   if (!customer) throw new ApiError(404, 'Customer not found');
 
+  const netOutstanding = computeNetOutstanding(customer.outstandingAmount, customer.advanceBalance ?? 0);
+  const amountDue = computeAmountDue(customer.outstandingAmount, customer.advanceBalance ?? 0);
+
   ApiResponse.success(res, {
     customer,
     currentOutstanding: customer.outstandingAmount,
+    netOutstanding,
+    amountDue,
     creditTermType: customer.creditTermType,
     creditTermLabel:
       customer.creditTermType === CreditTermType.LONG_TERM ? 'Long Term (ACC)' : 'Short Term',
@@ -342,6 +349,8 @@ export const receiveCustomerPayment = asyncHandler(async (req: AuthRequest, res:
         amount: payment[0].amount,
         outstandingAmount: customerDoc.outstandingAmount,
         advanceBalance: customerDoc.advanceBalance,
+        netOutstanding: computeNetOutstanding(customerDoc.outstandingAmount, customerDoc.advanceBalance),
+        amountDue: computeAmountDue(customerDoc.outstandingAmount, customerDoc.advanceBalance),
       },
       'Payment received',
       201
@@ -594,14 +603,14 @@ export const getWhatsAppStatementLink = asyncHandler(async (req: AuthRequest, re
   const summary = await getCustomerSummary(paramId(req.params.id));
   const phone = (customer.whatsapp || customer.phone).replace(/\D/g, '');
   const message = encodeURIComponent(
-    `Dear ${customer.name},\n\nYour account summary:\nOutstanding: ₹${summary.currentOutstanding.toFixed(2)}\nOverdue: ₹${summary.overdueAmount.toFixed(2)}\nPending Invoices: ${summary.pendingInvoices}\n\nPlease contact us for payment.\n\nThank you.`
+    `Dear ${customer.name},\n\nYour account summary:\nNet Outstanding: ₹${summary.netOutstanding.toFixed(2)}\nOverdue: ₹${summary.overdueAmount.toFixed(2)}\nPending Invoices: ${summary.pendingInvoices}\n\nPlease contact us for payment.\n\nThank you.`
   );
 
   ApiResponse.success(res, {
     whatsappUrl: `https://wa.me/91${phone}?text=${message}`,
     phone,
     summary: {
-      outstanding: summary.currentOutstanding,
+      outstanding: summary.netOutstanding,
       overdue: summary.overdueAmount,
       pendingInvoices: summary.pendingInvoices,
     },

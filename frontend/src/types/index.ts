@@ -103,6 +103,7 @@ export interface CustomerSummary {
   customer: Customer
   currentOutstanding: number
   netOutstanding: number
+  amountDue: number
   totalPurchases: number
   totalPayments: number
   pendingInvoices: number

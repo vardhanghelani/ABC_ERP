@@ -16,7 +16,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
 import { Plus, Eye, IndianRupee, Pencil, Trash2 } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, getAmountDue } from '@/lib/utils'
 import { toast } from 'sonner'
 
 type CustomerForm = {
@@ -143,8 +143,9 @@ export default function CustomersPage() {
   }
 
   const handleDeactivate = (customer: Customer) => {
-    const msg = customer.outstandingAmount > 0
-      ? `Deactivate "${customer.name}"?\n\nThey still owe ${formatCurrency(customer.outstandingAmount)}. History is kept but they won't appear in active lists.`
+    const due = getAmountDue(customer.outstandingAmount, customer.advanceBalance)
+    const msg = due > 0
+      ? `Deactivate "${customer.name}"?\n\nThey still owe ${formatCurrency(due)} (net outstanding). History is kept but they won't appear in active lists.`
       : `Deactivate "${customer.name}"?\n\nThey will be hidden from POS and active customer lists.`
     if (!window.confirm(msg)) return
     deactivateCustomer.mutate(customer._id)
@@ -188,7 +189,7 @@ export default function CustomersPage() {
       >
         {editingCustomer && (
           <div className="mb-4 flex flex-wrap gap-3 rounded-[var(--radius-md)] border border-[var(--color-border-soft)] bg-[var(--color-bg-sunken)] px-4 py-3 text-[var(--text-sm)]">
-            <span><strong>Outstanding:</strong> {formatCurrency(editingCustomer.outstandingAmount)}</span>
+            <span><strong>Net outstanding:</strong> {formatCurrency(getAmountDue(editingCustomer.outstandingAmount, editingCustomer.advanceBalance))}</span>
             <span><strong>Total purchases:</strong> {formatCurrency(editingCustomer.totalPurchases)}</span>
             <span className="text-[var(--color-text-muted)]">Balances are updated by sales and payments, not here.</span>
           </div>
@@ -242,7 +243,7 @@ export default function CustomersPage() {
                 <TableHead>Type</TableHead>
                 <TableHead>Credit</TableHead>
                 <TableHead align="right">Limit</TableHead>
-                <TableHead align="right">Outstanding</TableHead>
+                <TableHead align="right">Net Outstanding</TableHead>
                 <TableHead align="right">Available</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead align="center">Actions</TableHead>
@@ -250,7 +251,8 @@ export default function CustomersPage() {
             </TableHeader>
             <TableBody>
               {customers.map((c) => {
-                const available = Math.max(0, c.creditLimit - c.outstandingAmount)
+                const amountDue = getAmountDue(c.outstandingAmount, c.advanceBalance)
+                const available = Math.max(0, c.creditLimit - amountDue)
                 return (
                   <TableRow key={c._id}>
                     <TableCell>
@@ -265,13 +267,13 @@ export default function CustomersPage() {
                     </TableCell>
                     <TableCell align="right" mono>{formatCurrency(c.creditLimit)}</TableCell>
                     <TableCell align="right">
-                      <Badge variant={c.outstandingAmount > 0 ? 'warning' : 'success'}>{formatCurrency(c.outstandingAmount)}</Badge>
+                      <Badge variant={amountDue > 0 ? 'warning' : 'success'}>{formatCurrency(amountDue)}</Badge>
                     </TableCell>
                     <TableCell align="right" mono className="text-[var(--color-text-muted)]">{formatCurrency(available)}</TableCell>
                     <TableCell><Badge variant={c.isActive ? 'success' : 'muted'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
                     <TableCell align="center">
                       <div className="flex justify-center gap-1">
-                        {c.outstandingAmount > 0 && (
+                        {amountDue > 0 && (
                           <Link to={`/collect-payment?customer=${c._id}`}>
                             <Button size="sm" variant="ghost" iconOnly title="Collect payment">
                               <IndianRupee className="h-[18px] w-[18px]" />

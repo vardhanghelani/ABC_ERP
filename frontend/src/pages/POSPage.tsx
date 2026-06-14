@@ -23,7 +23,7 @@ import { ImportantField, importantInputClass, importantQtyClass } from '@/compon
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { Alert } from '@/components/ui/alert'
 import { StockBarInline } from '@/components/ui/stock-bar'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, getAmountDue } from '@/lib/utils'
 import { calculatePosTotals, parseMoneyInput } from '@/lib/posTotals'
 import { Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
@@ -72,7 +72,7 @@ export default function POSPage() {
 
   const isLongTermAcc = selectedCustomer?.creditTermType === 'long_term'
   const availableCredit = selectedCustomer
-    ? Math.max(0, (selectedCustomer.creditLimit || 0) - (selectedCustomer.outstandingAmount || 0))
+    ? Math.max(0, (selectedCustomer.creditLimit || 0) - getAmountDue(selectedCustomer.outstandingAmount || 0, selectedCustomer.advanceBalance || 0))
     : 0
 
   useEffect(() => {
@@ -463,7 +463,7 @@ export default function POSPage() {
                 <Alert
                   variant="info"
                   title={isLongTermAcc ? 'Long Term Credit (ACC)' : 'Short Term Credit'}
-                  description={`Outstanding ${formatCurrency(selectedCustomer.outstandingAmount)}, limit ${formatCurrency(selectedCustomer.creditLimit)}, available ${formatCurrency(availableCredit)}.${!isLongTermAcc ? ` Invoice due in ${selectedCustomer.creditDays || 30} days.` : ' Running account — pay anytime via Collect Payment.'}`}
+                  description={`Net outstanding ${formatCurrency(getAmountDue(selectedCustomer.outstandingAmount, selectedCustomer.advanceBalance))}, limit ${formatCurrency(selectedCustomer.creditLimit)}, available ${formatCurrency(availableCredit)}.${!isLongTermAcc ? ` Invoice due in ${selectedCustomer.creditDays || 30} days.` : ' Running account — pay anytime via Collect Payment.'}`}
                 />
               )}
 

@@ -21,7 +21,7 @@ export default function CreditPage() {
     queryKey: ['report-outstanding'],
     queryFn: () => fetchApi<{
       totalReceivables: number; totalOverdue: number;
-      customerWise: { _id: string; name: string; phone: string; outstandingAmount: number; creditLimit: number; riskCategory: string }[];
+      customerWise: { _id: string; name: string; phone: string; outstandingAmount: number; advanceBalance?: number; netOutstanding: number; creditLimit: number; riskCategory: string }[];
       invoiceWise: { invoiceNumber: string; balanceDue: number; daysOverdue: number; customer: { name: string } }[];
     }>('/reports/outstanding'),
   })
@@ -45,14 +45,14 @@ export default function CreditPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Receivables" value={formatCurrency(outstanding?.totalReceivables || 0)} icon={IndianRupee} accent="accent" />
+        <StatCard label="Total Receivables (Net)" value={formatCurrency(outstanding?.totalReceivables || 0)} icon={IndianRupee} accent="accent" />
         <StatCard label="Total Overdue" value={formatCurrency(outstanding?.totalOverdue || 0)} icon={AlertTriangle} accent="warning" />
         <StatCard label="Customers with Dues" value={String(outstanding?.customerWise?.length || 0)} icon={Users} accent="info" />
         <StatCard label="Overdue Invoices" value={String(outstanding?.invoiceWise?.filter((i) => i.daysOverdue > 0).length || 0)} icon={TrendingDown} accent="danger" />
       </div>
 
       <Tabs tabs={[
-        { id: 'outstanding', label: 'Customer Outstanding' },
+        { id: 'outstanding', label: 'Customer Net Outstanding' },
         { id: 'invoices', label: 'Invoice Wise' },
         { id: 'aging', label: 'Aging Report' },
       ]} active={tab} onChange={setTab} />
@@ -65,7 +65,7 @@ export default function CreditPage() {
                 <TableRow>
                   <TableHead>Customer</TableHead>
                   <TableHead>Phone</TableHead>
-                  <TableHead align="right">Outstanding</TableHead>
+                  <TableHead align="right">Net Outstanding</TableHead>
                   <TableHead align="right">Credit Limit</TableHead>
                   <TableHead>Usage</TableHead>
                   <TableHead>Risk</TableHead>
@@ -73,15 +73,17 @@ export default function CreditPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {outstanding?.customerWise?.map((c) => (
+                {outstanding?.customerWise?.map((c) => {
+                  const netDue = c.netOutstanding ?? Math.max(0, c.outstandingAmount - (c.advanceBalance ?? 0))
+                  return (
                   <TableRow key={c._id}>
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell mono>{c.phone}</TableCell>
-                    <TableCell align="right" mono className="font-semibold">{formatCurrency(c.outstandingAmount)}</TableCell>
+                    <TableCell align="right" mono className="font-semibold">{formatCurrency(netDue)}</TableCell>
                     <TableCell align="right" mono>{formatCurrency(c.creditLimit)}</TableCell>
                     <TableCell>
-                      <Badge variant={c.creditLimit > 0 && c.outstandingAmount / c.creditLimit >= 0.8 ? 'warning' : 'muted'}>
-                        {c.creditLimit > 0 ? `${((c.outstandingAmount / c.creditLimit) * 100).toFixed(0)}%` : '—'}
+                      <Badge variant={c.creditLimit > 0 && netDue / c.creditLimit >= 0.8 ? 'warning' : 'muted'}>
+                        {c.creditLimit > 0 ? `${((netDue / c.creditLimit) * 100).toFixed(0)}%` : '—'}
                       </Badge>
                     </TableCell>
                     <TableCell><Badge variant="muted" className="normal-case capitalize">{c.riskCategory?.replace('_', ' ')}</Badge></TableCell>
@@ -92,7 +94,8 @@ export default function CreditPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </DataTableWrapper>

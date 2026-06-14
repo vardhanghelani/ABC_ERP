@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert } from '@/components/ui/alert'
-import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn, getAmountDue } from '@/lib/utils'
 import { IndianRupee, User, FileText, RotateCcw, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -22,11 +22,15 @@ interface PaymentResult {
   amount: number
   outstandingAmount: number
   advanceBalance: number
+  netOutstanding: number
+  amountDue: number
 }
 
 interface PaymentContext {
   customer: Customer
   currentOutstanding: number
+  netOutstanding: number
+  amountDue: number
   creditTermType?: string
   creditTermLabel?: string
   pendingInvoices: number
@@ -91,7 +95,11 @@ export default function CollectPaymentPage() {
     placeholderData: (prev) => prev,
   })
 
-  const outstanding = context?.currentOutstanding ?? selectedCustomer?.outstandingAmount ?? 0
+  const amountDue = context?.amountDue
+    ?? getAmountDue(
+      context?.currentOutstanding ?? selectedCustomer?.outstandingAmount ?? 0,
+      context?.customer?.advanceBalance ?? selectedCustomer?.advanceBalance ?? 0,
+    )
   const displayCustomer = context?.customer ?? selectedCustomer
   const isLongTerm = (context?.creditTermType ?? selectedCustomer?.creditTermType) === 'long_term'
 
@@ -123,6 +131,8 @@ export default function CollectPaymentPage() {
           ? {
               ...old,
               currentOutstanding: data.outstandingAmount,
+              netOutstanding: data.netOutstanding,
+              amountDue: data.amountDue,
               customer: { ...old.customer, outstandingAmount: data.outstandingAmount, advanceBalance: data.advanceBalance },
             }
           : old
@@ -158,8 +168,8 @@ export default function CollectPaymentPage() {
   }
 
   const handlePayFull = () => {
-    if (outstanding > 0) {
-      setPaymentForm((f) => ({ ...f, amount: outstanding, isAdvance: false }))
+    if (amountDue > 0) {
+      setPaymentForm((f) => ({ ...f, amount: amountDue, isAdvance: false }))
     }
   }
 
@@ -180,7 +190,9 @@ export default function CollectPaymentPage() {
           {customers.map((c) => (
             <option key={c._id} value={c._id}>
               {c.name} — {c.phone}
-              {c.outstandingAmount > 0 ? ` (Due: ${formatCurrency(c.outstandingAmount)})` : ''}
+              {getAmountDue(c.outstandingAmount, c.advanceBalance) > 0
+                ? ` (Due: ${formatCurrency(getAmountDue(c.outstandingAmount, c.advanceBalance))})`
+                : ''}
             </option>
           ))}
         </Select>
@@ -210,9 +222,9 @@ export default function CollectPaymentPage() {
                       <p className="font-medium">{c.name}</p>
                       <p className="text-[var(--text-xs)] text-[var(--color-text-muted)]">{c.phone}</p>
                     </div>
-                    {c.outstandingAmount > 0 ? (
+                    {getAmountDue(c.outstandingAmount, c.advanceBalance) > 0 ? (
                       <Badge variant="warning" className="normal-case tracking-normal shrink-0">
-                        {formatCurrency(c.outstandingAmount)}
+                        {formatCurrency(getAmountDue(c.outstandingAmount, c.advanceBalance))}
                       </Badge>
                     ) : (
                       <Badge variant="success" className="normal-case tracking-normal shrink-0">Clear</Badge>
@@ -247,9 +259,9 @@ export default function CollectPaymentPage() {
                 </div>
               </div>
               <StatCard
-                label="Outstanding"
-                value={formatCurrency(outstanding)}
-                accent={outstanding > 0 ? 'warning' : 'success'}
+                label="Net Outstanding"
+                value={formatCurrency(amountDue)}
+                accent={amountDue > 0 ? 'warning' : 'success'}
               />
             </div>
             <Link
@@ -280,7 +292,7 @@ export default function CollectPaymentPage() {
                     value={paymentForm.amount || ''}
                     onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) || 0 })}
                   />
-                  {outstanding > 0 && (
+                  {amountDue > 0 && (
                     <Button type="button" variant="secondary" onClick={handlePayFull}>
                       Full
                     </Button>
@@ -320,7 +332,7 @@ export default function CollectPaymentPage() {
 
             {paymentForm.amount > 0 && !paymentForm.isAdvance && (
               <p className="mt-3 text-[var(--text-sm)] text-[var(--color-text-muted)]">
-                After payment: <strong>{formatCurrency(Math.max(0, outstanding - paymentForm.amount))}</strong>
+                After payment: <strong>{formatCurrency(Math.max(0, amountDue - paymentForm.amount))}</strong> net outstanding
               </p>
             )}
 

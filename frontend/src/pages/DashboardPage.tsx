@@ -127,12 +127,12 @@ export default function DashboardPage() {
         {stats.credit?.largestOutstanding && stats.credit.largestOutstanding.length > 0 && (
           <div className="col-span-12 lg:col-span-6">
             <Card>
-              <CardHeader><CardTitle>Largest Outstanding Customers</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Largest Net Outstanding</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {stats.credit.largestOutstanding.map((c) => (
                   <div key={c._id} className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border-soft)] p-3">
                     <span className="font-medium text-[var(--color-text-primary)]">{c.name}</span>
-                    <Badge variant="warning">{formatCurrency(c.outstandingAmount)}</Badge>
+                    <Badge variant="warning">{formatCurrency((c as { netOutstanding?: number }).netOutstanding ?? c.outstandingAmount)}</Badge>
                   </div>
                 ))}
               </CardContent>

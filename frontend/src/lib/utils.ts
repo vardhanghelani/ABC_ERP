@@ -48,3 +48,12 @@ export function getStockBarColor(percent: number): string {
   return 'var(--color-danger)'
 }
 
+export function getNetOutstanding(outstandingAmount: number, advanceBalance = 0): number {
+  return Math.round((outstandingAmount - advanceBalance) * 100) / 100
+}
+
+/** Amount to collect — net outstanding, never below zero. */
+export function getAmountDue(outstandingAmount: number, advanceBalance = 0): number {
+  return Math.max(0, getNetOutstanding(outstandingAmount, advanceBalance))
+}
+
