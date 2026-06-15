@@ -133,7 +133,7 @@ export function ProductSpecHighlight({
 }: {
   product: Pick<Product, 'attributes'>
   className?: string
-  size?: 'lg' | 'hero'
+  size?: 'sm' | 'md' | 'lg' | 'hero'
 }) {
   const specs = getProductSpecs(product)
   if (specs.length === 0) {
