@@ -21,15 +21,15 @@ const seed = async () => {
   console.log('Settings seeded');
 
   // Super Admin
-  const adminExists = await User.findOne({ email: 'admin@jewelleryerp.com' });
+  const adminExists = await User.findOne({ loginId: 'admin' });
   if (!adminExists) {
     await User.create({
       name: 'Super Admin',
-      email: 'admin@jewelleryerp.com',
+      loginId: 'admin',
       password: 'admin123',
       role: UserRole.SUPER_ADMIN,
     });
-    console.log('Super Admin created: admin@jewelleryerp.com / admin123');
+    console.log('Super Admin created: login ID "admin" / password "admin123" — change in Settings → Login');
   }
 
   // Sample Categories

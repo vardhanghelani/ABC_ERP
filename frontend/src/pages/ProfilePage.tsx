@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { putApi } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
@@ -41,6 +42,7 @@ export default function ProfilePage() {
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
   const [showCurrent, setShowCurrent] = useState(false)
   const [showNext, setShowNext] = useState(false)
+  const [savingPassword, setSavingPassword] = useState(false)
 
   useEffect(() => {
     try {
@@ -55,8 +57,12 @@ export default function ProfilePage() {
     toast.success('Preferences saved')
   }
 
-  const handlePasswordChange = (e: React.FormEvent) => {
+  const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!passwordForm.current) {
+      toast.error('Enter your current password')
+      return
+    }
     if (passwordForm.next.length < 6) {
       toast.error('New password must be at least 6 characters')
       return
@@ -65,8 +71,21 @@ export default function ProfilePage() {
       toast.error('Passwords do not match')
       return
     }
-    toast.info('Password change requires administrator setup — contact your admin to reset your password.')
-    setPasswordForm({ current: '', next: '', confirm: '' })
+    setSavingPassword(true)
+    try {
+      await putApi('/auth/credentials', {
+        currentPassword: passwordForm.current,
+        newPassword: passwordForm.next,
+        confirmPassword: passwordForm.confirm,
+      })
+      toast.success('Password updated')
+      setPasswordForm({ current: '', next: '', confirm: '' })
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      toast.error(message || 'Failed to update password')
+    } finally {
+      setSavingPassword(false)
+    }
   }
 
   if (!user) return null
@@ -107,7 +126,7 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <h2 className="text-[var(--text-lg)] font-semibold text-[var(--color-text-primary)]">{user.name}</h2>
-                    <p className="text-[var(--text-sm)] text-[var(--color-text-muted)]">{user.email}</p>
+                    <p className="text-[var(--text-sm)] text-[var(--color-text-muted)]">Login ID: {user.loginId}</p>
                     <p className="mt-1 capitalize text-[var(--text-sm)] text-[var(--color-text-secondary)]">{user.role.replace('_', ' ')}</p>
                     {user.phone && <p className="text-[var(--text-sm)] text-[var(--color-text-muted)]">{user.phone}</p>}
                   </div>
@@ -120,7 +139,7 @@ export default function ProfilePage() {
             <Card>
               <CardHeader><CardTitle>Change Password</CardTitle></CardHeader>
               <CardContent>
-                <Alert variant="info" title="Self-service password change" description="Password resets are managed by your administrator. Use this form to validate a new password before requesting a reset." className="mb-5" />
+                <Alert variant="info" title="Change password" description="You can also change Login ID and password under Settings → Login." className="mb-5" />
                 <form onSubmit={handlePasswordChange} className="max-w-md space-y-4">
                   <div>
                     <Label htmlFor="current">Current Password</Label>
@@ -144,7 +163,7 @@ export default function ProfilePage() {
                     <Label htmlFor="confirm">Confirm New Password</Label>
                     <Input id="confirm" type="password" value={passwordForm.confirm} onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })} />
                   </div>
-                  <Button type="submit">Update Password</Button>
+                  <Button type="submit" loading={savingPassword}>Update Password</Button>
                 </form>
               </CardContent>
             </Card>

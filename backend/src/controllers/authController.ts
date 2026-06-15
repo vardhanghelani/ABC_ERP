@@ -11,19 +11,39 @@ import { AuditAction } from '../models/AuditLog';
 import { paramId } from '../utils/params';
 import { UserRole, ROLE_PERMISSIONS } from '../utils/permissions';
 import { assertCanAssignRole, resolveAssignableRole } from '../utils/roleGuards';
+import { sanitizeLoginId } from '../services/userMigrationService';
+
+const loginIdSchema = z
+  .string()
+  .min(3, 'Login ID must be at least 3 characters')
+  .max(32)
+  .regex(/^[a-zA-Z0-9_]+$/, 'Login ID can only contain letters, numbers, and underscore');
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  loginId: loginIdSchema,
   password: z.string().min(6),
 });
 
 export const registerSchema = z.object({
   name: z.string().min(2),
-  email: z.string().email(),
+  loginId: loginIdSchema,
+  email: z.string().email().optional(),
   password: z.string().min(6),
   phone: z.string().optional(),
   role: z.nativeEnum(UserRole).optional(),
 });
+
+export const updateCredentialsSchema = z
+  .object({
+    loginId: loginIdSchema.optional(),
+    currentPassword: z.string().min(6),
+    newPassword: z.string().min(6).optional(),
+    confirmPassword: z.string().optional(),
+  })
+  .refine((data) => !data.newPassword || data.newPassword === data.confirmPassword, {
+    message: 'New password and confirmation do not match',
+    path: ['confirmPassword'],
+  });
 
 export const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
@@ -33,11 +53,12 @@ export const updateUserSchema = z.object({
 });
 
 export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { email, password } = req.body;
+  const { loginId, password } = req.body as z.infer<typeof loginSchema>;
+  const normalizedLoginId = sanitizeLoginId(loginId);
 
-  const user = await User.findOne({ email }).select('+password +refreshToken');
+  const user = await User.findOne({ loginId: normalizedLoginId }).select('+password +refreshToken');
   if (!user || !(await user.comparePassword(password))) {
-    throw new ApiError(401, 'Invalid email or password');
+    throw new ApiError(401, 'Invalid login ID or password');
   }
 
   if (!user.isActive) {
@@ -65,6 +86,7 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
     user: {
       id: user._id,
       name: user.name,
+      loginId: user.loginId,
       email: user.email,
       role: user.role,
       permissions: ROLE_PERMISSIONS[user.role],
@@ -74,13 +96,20 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
 });
 
 export const register = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { name, email, password, phone, role } = req.body;
+  const { name, loginId, email, password, phone, role } = req.body as z.infer<typeof registerSchema>;
+  const normalizedLoginId = sanitizeLoginId(loginId);
 
-  const existing = await User.findOne({ email });
-  if (existing) throw new ApiError(409, 'Email already registered');
+  const existing = await User.findOne({ loginId: normalizedLoginId });
+  if (existing) throw new ApiError(409, 'Login ID already in use');
+
+  if (email) {
+    const emailTaken = await User.findOne({ email });
+    if (emailTaken) throw new ApiError(409, 'Email already registered');
+  }
 
   const user = await User.create({
     name,
+    loginId: normalizedLoginId,
     email,
     password,
     phone,
@@ -90,7 +119,55 @@ export const register = asyncHandler(async (req: AuthRequest, res: Response) => 
 
   await logAudit(req, AuditAction.CREATE, 'User', user._id.toString());
 
-  ApiResponse.success(res, { id: user._id, name: user.name, email: user.email, role: user.role }, 'User created', 201);
+  ApiResponse.success(
+    res,
+    { id: user._id, name: user.name, loginId: user.loginId, email: user.email, role: user.role },
+    'User created',
+    201
+  );
+});
+
+export const updateCredentials = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { loginId, currentPassword, newPassword } = req.body as z.infer<typeof updateCredentialsSchema>;
+
+  const user = await User.findById(req.user!._id).select('+password');
+  if (!user) throw new ApiError(404, 'User not found');
+
+  if (!(await user.comparePassword(currentPassword))) {
+    throw new ApiError(401, 'Current password is incorrect');
+  }
+
+  if (loginId) {
+    const normalizedLoginId = sanitizeLoginId(loginId);
+    if (normalizedLoginId !== user.loginId) {
+      const taken = await User.findOne({ loginId: normalizedLoginId, _id: { $ne: user._id } });
+      if (taken) throw new ApiError(409, 'Login ID already in use');
+      user.loginId = normalizedLoginId;
+    }
+  }
+
+  if (newPassword) {
+    user.password = newPassword;
+  }
+
+  await user.save();
+  await logAudit(req, AuditAction.UPDATE, 'User', user._id.toString(), {
+    loginId: user.loginId,
+    passwordChanged: Boolean(newPassword),
+  });
+
+  ApiResponse.success(
+    res,
+    {
+      id: user._id,
+      name: user.name,
+      loginId: user.loginId,
+      email: user.email,
+      role: user.role,
+      permissions: ROLE_PERMISSIONS[user.role],
+    },
+    'Login credentials updated'
+  );
 });
 
 export const refreshAccessToken = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -125,6 +202,7 @@ export const getMe = asyncHandler(async (req: AuthRequest, res: Response) => {
   ApiResponse.success(res, {
     id: user._id,
     name: user.name,
+    loginId: user.loginId,
     email: user.email,
     role: user.role,
     phone: user.phone,

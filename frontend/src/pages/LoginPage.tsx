@@ -37,8 +37,8 @@ function WarehouseIllustration() {
 export default function LoginPage() {
   const { login, user } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('admin@jewelleryerp.com')
-  const [password, setPassword] = useState('admin123')
+  const [loginId, setLoginId] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -51,11 +51,11 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     try {
-      const loggedInUser = await login(email, password)
+      const loggedInUser = await login(loginId, password)
       toast.success('Welcome back!')
       navigate(getDefaultRoute(loggedInUser.permissions))
     } catch {
-      toast.error('Invalid email or password')
+      toast.error('Invalid login ID or password')
     } finally {
       setLoading(false)
     }
@@ -102,19 +102,20 @@ export default function LoginPage() {
 
           <h1 className="text-[var(--text-xl)] font-semibold text-[var(--color-text-primary)]">Sign in</h1>
           <p className="mt-1 text-[var(--text-sm)] text-[var(--color-text-muted)]">
-            Enter your credentials to access the dashboard
+            Enter your login ID and password
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <div>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="loginId">Login ID</Label>
               <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="loginId"
+                type="text"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value.replace(/\s/g, '').toLowerCase())}
                 required
-                autoComplete="email"
+                autoComplete="username"
+                placeholder="e.g. abcadmin"
               />
             </div>
             <div>
@@ -143,10 +144,6 @@ export default function LoginPage() {
               Sign In
             </Button>
           </form>
-
-          <p className="mt-6 text-center text-[var(--text-xs)] text-[var(--color-text-muted)]">
-            Demo: admin@jewelleryerp.com / admin123
-          </p>
         </div>
       </div>
     </div>

@@ -4,7 +4,8 @@ import { UserRole } from '../utils/permissions';
 
 export interface IUser extends Document {
   name: string;
-  email: string;
+  loginId: string;
+  email?: string;
   password: string;
   phone?: string;
   role: UserRole;
@@ -18,7 +19,17 @@ export interface IUser extends Document {
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    loginId: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      minlength: 3,
+      maxlength: 32,
+      match: /^[a-z0-9_]+$/,
+    },
+    email: { type: String, lowercase: true, trim: true, sparse: true, unique: true },
     password: { type: String, required: true, minlength: 6, select: false },
     phone: { type: String, trim: true },
     role: {

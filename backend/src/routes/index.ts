@@ -32,6 +32,7 @@ router.post('/auth/login', loginRateLimit, validate(auth.loginSchema), auth.logi
 router.post('/auth/refresh', refreshRateLimit, auth.refreshAccessToken);
 router.post('/auth/logout', authenticate, auth.logout);
 router.get('/auth/me', authenticate, auth.getMe);
+router.put('/auth/credentials', authenticate, validate(auth.updateCredentialsSchema), auth.updateCredentials);
 router.post('/auth/register', authenticate, authorize(PERMISSIONS.USERS_CREATE), validate(auth.registerSchema), auth.register);
 router.get('/auth/users', authenticate, authorize(PERMISSIONS.USERS_VIEW), auth.getUsers);
 router.put('/auth/users/:id', authenticate, authorize(PERMISSIONS.USERS_UPDATE), validate(auth.updateUserSchema), auth.updateUser);

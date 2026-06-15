@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "ts-node-dev src/seed/seed.ts",
+    "set-admin": "ts-node scripts/set-admin-credentials.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

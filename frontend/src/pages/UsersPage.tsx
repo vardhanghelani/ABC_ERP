@@ -24,7 +24,7 @@ export default function UsersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
+                <TableHead>Login ID</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
@@ -33,7 +33,7 @@ export default function UsersPage() {
               {users.map((u) => (
                 <TableRow key={(u as User & { _id?: string })._id || u.id}>
                   <TableCell className="font-medium">{u.name}</TableCell>
-                  <TableCell>{u.email}</TableCell>
+                  <TableCell>{(u as User & { loginId?: string }).loginId || '—'}</TableCell>
                   <TableCell><Badge variant="default" className="normal-case capitalize">{u.role.replace('_', ' ')}</Badge></TableCell>
                   <TableCell><Badge variant="success">Active</Badge></TableCell>
                 </TableRow>

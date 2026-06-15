@@ -58,6 +58,7 @@ export async function createTestContext(stock = 100): Promise<TestContext> {
   const suffix = nextId();
   const user = await User.create({
     name: 'Integration Tester',
+    loginId: `test_${suffix.replace(/[^a-z0-9_]/g, '').slice(0, 20)}`,
     email: `test-${suffix}@example.com`,
     password: 'test123456',
     role: UserRole.ADMIN,

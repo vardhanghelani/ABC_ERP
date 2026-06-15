@@ -3,7 +3,8 @@ export type UserRole = 'super_admin' | 'admin' | 'salesman' | 'warehouse' | 'acc
 export interface User {
   id: string
   name: string
-  email: string
+  loginId: string
+  email?: string
   role: UserRole
   phone?: string
   permissions: string[]

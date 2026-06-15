@@ -5,8 +5,9 @@ import type { User } from '@/types'
 interface AuthContextType {
   user: User | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<User>
+  login: (loginId: string, password: string) => Promise<User>
   logout: () => Promise<void>
+  refreshUser: () => Promise<void>
   hasPermission: (permission: string) => boolean
 }
 
@@ -28,11 +29,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = async (email: string, password: string): Promise<User> => {
-    const { data } = await api.post('/auth/login', { email, password })
+  const login = async (loginId: string, password: string): Promise<User> => {
+    const { data } = await api.post('/auth/login', { loginId, password })
     localStorage.setItem('accessToken', data.data.accessToken)
     setUser(data.data.user)
     return data.data.user
+  }
+
+  const refreshUser = async () => {
+    const token = localStorage.getItem('accessToken')
+    if (!token) return
+    const { data } = await api.get('/auth/me')
+    setUser(data.data)
   }
 
   const logout = async () => {
@@ -46,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, refreshUser, hasPermission }}>
       {children}
     </AuthContext.Provider>
   )
