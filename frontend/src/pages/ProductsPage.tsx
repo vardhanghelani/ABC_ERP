@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, fetchApi, postApi, putApi, deleteApi, downloadAuthenticated } from '@/lib/api'
 import type { Product, Category, CategoryField } from '@/types'
+import { invalidateProductQueries } from '@/lib/productQueries'
 import { fieldTypeLabel, validateAttributesClient } from '@/lib/fieldBuilder'
 import { DynamicFieldInput, fieldTypeHint } from '@/components/products/DynamicFieldInput'
 import {
@@ -34,7 +36,8 @@ import { Drawer } from '@/components/ui/modal'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
-import { Plus, Download, Settings2, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Download, Settings2, Pencil, Trash2, Archive } from 'lucide-react'
+import { ProductSpecBadges } from '@/components/pos/ProductSpecBadges'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -54,6 +57,7 @@ const getCategoryId = (product: Product): string => {
 }
 
 export default function ProductsPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -65,9 +69,9 @@ export default function ProductsPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
 
   const { data: productsData, isLoading } = useQuery({
-    queryKey: ['products', search],
+    queryKey: ['products', 'active', search],
     queryFn: async () => {
-      const { data } = await api.get('/products', { params: { search, limit: 50 } })
+      const { data } = await api.get('/products', { params: { search, status: 'active', limit: 50 } })
       return data
     },
   })
@@ -161,7 +165,7 @@ export default function ProductsPage() {
   const createProduct = useMutation({
     mutationFn: (data: typeof form) => postApi('/products', data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] })
+      invalidateProductQueries(queryClient)
       closeDrawer()
       toast.success('Product created')
     },
@@ -173,7 +177,7 @@ export default function ProductsPage() {
     mutationFn: ({ id, data }: { id: string; data: Omit<typeof form, 'openingStock'> }) =>
       putApi(`/products/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] })
+      invalidateProductQueries(queryClient)
       closeDrawer()
       toast.success('Product updated')
     },
@@ -184,7 +188,7 @@ export default function ProductsPage() {
   const deactivateProduct = useMutation({
     mutationFn: (id: string) => deleteApi(`/products/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] })
+      invalidateProductQueries(queryClient)
       toast.success('Product deactivated')
     },
     onError: (err: { response?: { data?: { message?: string } } }) =>
@@ -277,6 +281,9 @@ export default function ProductsPage() {
         description="Add products with category-specific specs — fields are String, Whole Number, or Decimal"
         actions={
           <>
+            <Button variant="secondary" onClick={() => navigate('/products/inactive')}>
+              <Archive className="h-[18px] w-[18px]" /> Inactive Products
+            </Button>
             <Button variant="secondary" onClick={exportProducts}>
               <Download className="h-[18px] w-[18px]" /> Export
             </Button>
@@ -521,9 +528,7 @@ export default function ProductsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((p) => {
-                const specEntries = Object.entries(p.attributes || {}).slice(0, 3)
-                return (
+              {products.map((p) => (
                   <TableRow key={p._id}>
                     <TableCell><Badge variant="muted">{p.sku}</Badge></TableCell>
                     <TableCell className={`font-medium ${importantTableCellClass}`}>{p.name}</TableCell>
@@ -531,13 +536,7 @@ export default function ProductsPage() {
                       {p.category && typeof p.category === 'object' ? p.category.name : '-'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {specEntries.length === 0 ? (
-                          <span className="text-[var(--text-xs)] text-[var(--color-text-muted)]">—</span>
-                        ) : specEntries.map(([k, v]) => (
-                          <Badge key={k} variant="muted" className="normal-case tracking-normal">{k}: {String(v)}</Badge>
-                        ))}
-                      </div>
+                      <ProductSpecBadges product={p} size="sm" showLabels />
                     </TableCell>
                     <TableCell className={importantTableCellClass}>
                       <StockBar current={p.currentStock} max={p.reorderLevel * 3} />
@@ -546,7 +545,7 @@ export default function ProductsPage() {
                     <TableCell align="center" mono className={importantTableCellClass}>{p.minimumBunch ?? 1}</TableCell>
                     <TableCell>
                       <Badge variant={stockStatusVariant(p.currentStock, p.reorderLevel)}>
-                        {p.status === 'active' ? stockStatusLabel(p.currentStock, p.reorderLevel) : p.status}
+                        {stockStatusLabel(p.currentStock, p.reorderLevel)}
                       </Badge>
                     </TableCell>
                     <TableCell align="right">
@@ -560,15 +559,14 @@ export default function ProductsPage() {
                           iconOnly
                           title="Deactivate product"
                           onClick={() => handleDeactivate(p)}
-                          disabled={p.status === 'inactive' || deactivateProduct.isPending}
+                          disabled={deactivateProduct.isPending}
                         >
                           <Trash2 className="h-[18px] w-[18px]" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                )
-              })}
+                ))}
             </TableBody>
           </Table>
         </DataTableWrapper>

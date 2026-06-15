@@ -29,6 +29,12 @@ export const updateStock = async (params: StockMovementParams) => {
   try {
     const product = await Product.findById(params.productId).session(session);
     if (!product) throw new ApiError(404, 'Product not found');
+    if (product.status === 'inactive') {
+      throw new ApiError(
+        400,
+        `"${product.name}" is inactive. Reactivate it from Inactive Products before recording stock movements.`
+      );
+    }
 
     const previousStock = product.currentStock;
     let newStock = previousStock;

@@ -59,6 +59,7 @@ export const getProducts = asyncHandler(async (req: AuthRequest, res: Response) 
     const results = await searchProductsComprehensive(searchTerm, {
       limit: limit + skip,
       category: req.query.category as string | undefined,
+      status: req.query.status as string | undefined,
     });
     const paginated = results.slice(skip, skip + limit);
     return ApiResponse.paginated(res, paginated, { page, limit, total: results.length });
@@ -201,6 +202,20 @@ export const deleteProduct = asyncHandler(async (req: AuthRequest, res: Response
   ApiResponse.success(res, null, 'Product deactivated');
 });
 
+export const reactivateProduct = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) throw new ApiError(404, 'Product not found');
+  if (product.status === 'active') {
+    ApiResponse.success(res, product, 'Product is already active');
+    return;
+  }
+
+  product.status = 'active';
+  await product.save();
+  await logAudit(req, AuditAction.UPDATE, 'Product', product._id.toString(), { status: 'active' });
+  ApiResponse.success(res, product, 'Product reactivated');
+});
+
 export const uploadProductImage = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.file) throw new ApiError(400, 'No image uploaded');
 
@@ -228,6 +243,7 @@ export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Respons
   const q = (req.query.q as string)?.trim() || '';
   const category = req.query.category as string | undefined;
   const supplier = req.query.supplier as string | undefined;
+  const status = (req.query.status as string | undefined) || 'active';
 
   if (q.length < 2) {
     ApiResponse.success(res, []);
@@ -238,6 +254,7 @@ export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Respons
     limit: 50,
     category,
     supplier,
+    status,
   });
 
   ApiResponse.success(res, products);

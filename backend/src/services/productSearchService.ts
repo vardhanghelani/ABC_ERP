@@ -97,12 +97,14 @@ export const productMatchesQuery = (product: SearchableProduct, query: string): 
 
 export async function searchProductsComprehensive(
   query: string,
-  options: { limit?: number; category?: string; supplier?: string } = {}
+  options: { limit?: number; category?: string; supplier?: string; status?: string } = {}
 ) {
   const q = query.trim();
   if (q.length < 2) return [];
 
-  const filter: Record<string, unknown> = { status: 'active' };
+  const filter: Record<string, unknown> = {};
+  if (options.status) filter.status = options.status;
+  else filter.status = 'active';
   if (options.category) filter.category = options.category;
   if (options.supplier) filter.supplier = options.supplier;
 

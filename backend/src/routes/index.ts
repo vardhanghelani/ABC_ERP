@@ -57,6 +57,7 @@ router.get('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), 
 router.post('/products', authenticate, authorize(PERMISSIONS.PRODUCTS_CREATE), validate(product.productSchema), product.createProduct);
 router.put('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), validate(product.updateProductSchema), product.updateProduct);
 router.delete('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_DELETE), product.deleteProduct);
+router.post('/products/:id/reactivate', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), product.reactivateProduct);
 router.post('/products/:id/image', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), upload.single('image'), product.uploadProductImage);
 
 // Inventory

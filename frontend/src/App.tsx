@@ -8,6 +8,7 @@ import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
 import CategoriesPage from '@/pages/CategoriesPage'
 import ProductsPage from '@/pages/ProductsPage'
+import InactiveProductsPage from '@/pages/InactiveProductsPage'
 import InventoryPage from '@/pages/InventoryPage'
 import POSPage from '@/pages/POSPage'
 import CustomersPage from '@/pages/CustomersPage'
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/pos" element={<ProtectedRoute permission="pos:access"><POSPage /></ProtectedRoute>} />
             <Route path="/collect-payment" element={<ProtectedRoute permission="payments:manage"><CollectPaymentPage /></ProtectedRoute>} />
             <Route path="/products" element={<ProtectedRoute permission="products:view"><ProductsPage /></ProtectedRoute>} />
+            <Route path="/products/inactive" element={<ProtectedRoute permission="products:view"><InactiveProductsPage /></ProtectedRoute>} />
             <Route path="/categories" element={<ProtectedRoute permission="categories:view"><CategoriesPage /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute permission="inventory:view"><InventoryPage /></ProtectedRoute>} />
             <Route path="/sales" element={<ProtectedRoute permission="sales:view"><SalesPage /></ProtectedRoute>} />

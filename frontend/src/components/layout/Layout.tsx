@@ -59,6 +59,7 @@ const routeTitles: Record<string, string> = {
   '/pos': 'Point of Sale',
   '/collect-payment': 'Collect Payment',
   '/products': 'Products',
+  '/products/inactive': 'Inactive Products',
   '/categories': 'Categories',
   '/inventory': 'Stock Movements',
   '/purchases': 'Purchase Orders',
