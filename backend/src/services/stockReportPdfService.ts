@@ -61,12 +61,16 @@ function getAttributeValue(
 }
 
 function buildTableColumns(specColumns: SpecColumn[]): PdfTableColumn[] {
-  const fixedUsed = 28 + 108 + 42 + 38 + 40 + 52 + 56 + 46;
-  const specWidth = Math.max(38, Math.floor((layout.contentWidth - fixedUsed) / Math.max(specColumns.length, 1)));
+  const headWidth = 28 + 120;
+  const tailWidth = 52 + 56;
+  const specWidth = Math.max(
+    45,
+    Math.floor((layout.contentWidth - headWidth - tailWidth) / Math.max(specColumns.length, 1))
+  );
 
   const columns: PdfTableColumn[] = [
     { label: '#', width: 28, align: 'center' },
-    { label: 'Product Name', width: 108, align: 'left' },
+    { label: 'Product Name', width: 120, align: 'left' },
   ];
 
   specColumns.forEach((spec) => {
@@ -74,12 +78,8 @@ function buildTableColumns(specColumns: SpecColumn[]): PdfTableColumn[] {
   });
 
   columns.push(
-    { label: 'Stock (pcs)', width: 42, align: 'right' },
-    { label: 'Reorder', width: 38, align: 'right' },
-    { label: 'Min Bunch', width: 40, align: 'right' },
-    { label: 'Purchase Rate', width: 52, align: 'right' },
-    { label: 'Stock Value', width: 56, align: 'right' },
-    { label: 'Status', width: 46, align: 'center' }
+    { label: 'Stock (pcs)', width: 52, align: 'right' },
+    { label: 'Status', width: 56, align: 'center' }
   );
 
   const totalWidth = columns.reduce((sum, col) => sum + col.width, 0);
@@ -231,7 +231,6 @@ export async function generateStockReportPDF(companyInfo: Record<string, string>
       drawTableHeader();
 
       let categoryUnits = 0;
-      let categoryValue = 0;
 
       group.products.forEach((product, index) => {
         const rowValues = [
@@ -239,10 +238,6 @@ export async function generateStockReportPDF(companyInfo: Record<string, string>
           product.name,
           ...group.specColumns.map((spec) => getAttributeValue(product.attributes, spec.key)),
           formatPdfInteger(product.currentStock),
-          formatPdfInteger(product.reorderLevel),
-          formatPdfInteger(product.minimumBunch),
-          formatPdfMoney(product.purchasePrice),
-          formatPdfMoney(product.currentStock * product.purchasePrice),
           stockStatusLabel(product.currentStock, product.reorderLevel),
         ];
 
@@ -255,15 +250,12 @@ export async function generateStockReportPDF(companyInfo: Record<string, string>
 
         y = drawPdfTableRow(doc, layout, y, columns, rowValues, { height: rowHeight, wrap: true });
         categoryUnits += product.currentStock;
-        categoryValue += product.currentStock * product.purchasePrice;
       });
 
       const stockIndex = 2 + group.specColumns.length;
-      const valueIndex = stockIndex + 4;
       const subtotalValues = columns.map((_col, index) => {
         if (index === 1) return `${group.categoryName} Subtotal`;
         if (index === stockIndex) return formatPdfInteger(categoryUnits);
-        if (index === valueIndex) return formatPdfMoney(categoryValue);
         return '';
       });
 
