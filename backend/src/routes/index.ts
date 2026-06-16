@@ -71,6 +71,7 @@ router.post('/inventory/audit', authenticate, authorize(PERMISSIONS.INVENTORY_MA
 router.get('/inventory/transactions', authenticate, authorize(PERMISSIONS.INVENTORY_VIEW), inventory.getAllTransactions);
 router.get('/inventory/history/:productId', authenticate, authorize(PERMISSIONS.INVENTORY_VIEW), inventory.getHistory);
 router.get('/inventory/valuation', authenticate, authorize(PERMISSIONS.INVENTORY_VIEW), inventory.getValuation);
+router.get('/inventory/stock-report/pdf', authenticate, authorize(PERMISSIONS.INVENTORY_VIEW), inventory.downloadStockReportPDF);
 
 // Customers
 router.get('/customers/picker', authenticate, authorize(PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.PAYMENTS_MANAGE, PERMISSIONS.POS_ACCESS), customer.getCustomersPicker);
@@ -148,6 +149,7 @@ router.get('/reports/profit', authenticate, authorize(PERMISSIONS.REPORTS_VIEW),
 router.get('/reports/customers', authenticate, authorize(PERMISSIONS.REPORTS_VIEW), report.customerReport);
 router.get('/reports/aging', authenticate, authorize(PERMISSIONS.REPORTS_VIEW), credit.getAgingReportHandler);
 router.get('/reports/outstanding', authenticate, authorize(PERMISSIONS.REPORTS_VIEW), credit.getOutstandingReportHandler);
+router.get('/reports/outstanding/pdf', authenticate, authorize(PERMISSIONS.REPORTS_VIEW), report.downloadOutstandingReportPDF);
 router.get('/credit/dashboard', authenticate, authorize(PERMISSIONS.ACCOUNTING_VIEW), credit.getCreditDashboardHandler);
 
 // Notifications

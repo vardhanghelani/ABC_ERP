@@ -15,6 +15,9 @@ import {
   getCustomerReport,
   getSalesGraph,
 } from '../services/reportService';
+import { Settings } from '../models/Settings';
+import { generateCreditReportPDF } from '../services/pdf/creditReportPdfService';
+import { sendPdfResponse } from '../services/pdf/pdfLayout';
 
 function notificationAccessFilter(userId: mongoose.Types.ObjectId, permissions: string[]) {
   const canSeeGlobal =
@@ -74,6 +77,17 @@ export const profitReport = asyncHandler(async (req: AuthRequest, res: Response)
 export const customerReport = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const report = await getCustomerReport();
   ApiResponse.success(res, report);
+});
+
+export const downloadOutstandingReportPDF = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const settings = await Settings.find();
+  const companyInfo: Record<string, string> = {};
+  settings.forEach((setting) => {
+    companyInfo[setting.key] = String(setting.value ?? '');
+  });
+  const pdf = await generateCreditReportPDF(companyInfo);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  sendPdfResponse(res, pdf, `credit-receivables-report-${dateStamp}.pdf`);
 });
 
 export const getNotifications = asyncHandler(async (req: AuthRequest, res: Response) => {

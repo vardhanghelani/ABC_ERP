@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fetchApi } from '@/lib/api'
+import { fetchApi, downloadAuthenticated } from '@/lib/api'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, StatCard } from '@/components/ui/card'
@@ -11,7 +11,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
 import { formatCurrency } from '@/lib/utils'
-import { IndianRupee, AlertTriangle, Users, TrendingDown } from 'lucide-react'
+import { IndianRupee, AlertTriangle, Users, TrendingDown, FileDown } from 'lucide-react'
+import { toast } from 'sonner'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 export default function CreditPage() {
@@ -38,9 +39,22 @@ export default function CreditPage() {
         title="Credit Management"
         description="Receivables, aging analysis, and outstanding reports"
         actions={
-          <Link to="/collect-payment">
-            <Button><IndianRupee className="h-[18px] w-[18px]" /> Collect Payment</Button>
-          </Link>
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const dateStamp = new Date().toISOString().slice(0, 10)
+                downloadAuthenticated('/reports/outstanding/pdf', `credit-receivables-${dateStamp}.pdf`).catch(() =>
+                  toast.error('Failed to download credit report PDF')
+                )
+              }}
+            >
+              <FileDown className="h-[18px] w-[18px]" /> Download PDF
+            </Button>
+            <Link to="/collect-payment">
+              <Button><IndianRupee className="h-[18px] w-[18px]" /> Collect Payment</Button>
+            </Link>
+          </>
         }
       />
 

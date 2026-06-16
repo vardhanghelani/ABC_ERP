@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, postApi } from '@/lib/api'
+import { api, postApi, downloadAuthenticated } from '@/lib/api'
 import type { Product } from '@/types'
 import { invalidateProductQueries } from '@/lib/productQueries'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -18,7 +18,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow, DataTableWrapper,
 } from '@/components/ui/table'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Package, ArrowDownToLine, ArrowUpFromLine, Plus } from 'lucide-react'
+import { Package, ArrowDownToLine, ArrowUpFromLine, Plus, FileDown } from 'lucide-react'
 import { toast } from 'sonner'
 
 type MovementType = 'stock_in' | 'stock_out' | 'adjustment'
@@ -162,15 +162,27 @@ export default function InventoryPage() {
   const products: Product[] = productsData?.data || []
   const transactions = transactionsData?.data || []
 
+  const downloadStockPdf = () => {
+    const dateStamp = new Date().toISOString().slice(0, 10)
+    downloadAuthenticated(`/inventory/stock-report/pdf`, `stock-report-${dateStamp}.pdf`).catch(() =>
+      toast.error('Failed to download stock report PDF')
+    )
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Stock Movements"
         description="Record stock in/out and adjustments for active products only"
         actions={
-          <Button onClick={() => setDrawerOpen(true)}>
-            <Plus className="h-[18px] w-[18px]" /> Record Movement
-          </Button>
+          <>
+            <Button variant="secondary" onClick={downloadStockPdf} disabled={productsLoading}>
+              <FileDown className="h-[18px] w-[18px]" /> Download Stock PDF
+            </Button>
+            <Button onClick={() => setDrawerOpen(true)}>
+              <Plus className="h-[18px] w-[18px]" /> Record Movement
+            </Button>
+          </>
         }
       />
 

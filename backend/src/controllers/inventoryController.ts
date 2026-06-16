@@ -6,6 +6,8 @@ import { ApiError } from '../utils/ApiError';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { updateStock, getStockHistory, getInventoryValuation } from '../services/stockService';
+import { generateStockReportPDF } from '../services/stockReportPdfService';
+import { Settings } from '../models/Settings';
 import { paramId } from '../utils/params';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
@@ -115,6 +117,20 @@ export const getAllTransactions = asyncHandler(async (req: AuthRequest, res: Res
 export const getValuation = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const valuation = await getInventoryValuation();
   ApiResponse.success(res, valuation);
+});
+
+export const downloadStockReportPDF = asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const settings = await Settings.find();
+  const companyInfo: Record<string, string> = {};
+  settings.forEach((setting) => {
+    companyInfo[setting.key] = String(setting.value ?? '');
+  });
+
+  const pdf = await generateStockReportPDF(companyInfo);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=stock-report-${dateStamp}.pdf`);
+  res.send(pdf);
 });
 
 export const inventoryAudit = asyncHandler(async (req: AuthRequest, res: Response) => {

@@ -35,7 +35,6 @@ import {
   calculateRiskScore,
   postPaymentLedger,
   postLedgerEntry,
-  generateStatementPDF,
   setOpeningBalance,
   markBadDebt,
   validateCustomerLedgerBalance,
@@ -43,6 +42,7 @@ import {
   computeAmountDue,
   computeNetOutstanding,
 } from '../services/ledgerService';
+import { generateCustomerStatementPDF } from '../services/pdf/customerStatementPdfService';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
 
@@ -507,9 +507,11 @@ export const downloadCustomerStatement = asyncHandler(async (req: AuthRequest, r
   const companyInfo: Record<string, string> = {};
   settings.forEach((s) => { companyInfo[s.key] = String(s.value); });
 
-  const pdf = await generateStatementPDF(paramId(req.params.id), companyInfo);
+  const pdf = await generateCustomerStatementPDF(paramId(req.params.id), companyInfo);
+  const customer = await Customer.findById(paramId(req.params.id)).select('name');
+  const safeName = (customer?.name || 'customer').replace(/[^\w\-]+/g, '-').slice(0, 40);
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename=statement-${paramId(req.params.id)}.pdf`);
+  res.setHeader('Content-Disposition', `attachment; filename=statement-${safeName}.pdf`);
   res.send(pdf);
 });
 

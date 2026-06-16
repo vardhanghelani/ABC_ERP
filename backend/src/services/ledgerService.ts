@@ -17,7 +17,6 @@ import {
   CreditTermType,
 } from '../models';
 import { ApiError } from '../utils/ApiError';
-import PDFDocument from 'pdfkit';
 
 interface PostLedgerParams {
   entityType: LedgerEntityType;
@@ -914,67 +913,6 @@ export const getCreditDashboard = async () => {
     monthCollections: monthCollections[0]?.total || 0,
     largestOutstanding,
   };
-};
-
-export const generateStatementPDF = async (
-  customerId: string,
-  companyInfo: Record<string, string>
-): Promise<Buffer> => {
-  const summary = await getCustomerSummary(customerId);
-  const { entries } = await getLedgerView(LedgerEntityType.CUSTOMER, customerId, 1, 500);
-
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ margin: 50, size: 'A4' });
-      const chunks: Buffer[] = [];
-      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
-
-      doc.fontSize(18).text(companyInfo.company_name || 'Jewellery ERP', { align: 'center' });
-      doc.fontSize(12).text('CUSTOMER ACCOUNT STATEMENT', { align: 'center' });
-      doc.moveDown();
-
-      doc.fontSize(10);
-      doc.text(`Customer: ${summary.customer.name}`);
-      doc.text(`Phone: ${summary.customer.phone}`);
-      if (summary.customer.gstNumber) doc.text(`GST: ${summary.customer.gstNumber}`);
-      doc.text(`Statement Date: ${new Date().toLocaleDateString('en-IN')}`);
-      doc.moveDown();
-
-      doc.text(`Net Outstanding: ₹${summary.netOutstanding.toFixed(2)}`);
-      doc.text(`Total Purchases: ₹${summary.totalPurchases.toFixed(2)}`);
-      doc.text(`Total Payments: ₹${summary.totalPayments.toFixed(2)}`);
-      doc.text(`Overdue Amount: ₹${summary.overdueAmount.toFixed(2)}`);
-      doc.text(`Available Credit: ₹${summary.availableCredit.toFixed(2)}`);
-      doc.moveDown();
-
-      doc.font('Helvetica-Bold');
-      doc.text('Date', 50, doc.y, { width: 70 });
-      doc.text('Reference', 120, doc.y - 12, { width: 80 });
-      doc.text('Type', 200, doc.y - 12, { width: 80 });
-      doc.text('Debit', 290, doc.y - 12, { width: 60 });
-      doc.text('Credit', 350, doc.y - 12, { width: 60 });
-      doc.text('Balance', 410, doc.y - 12, { width: 70 });
-      doc.font('Helvetica');
-
-      let y = doc.y + 5;
-      for (const entry of [...entries].reverse()) {
-        if (y > 700) { doc.addPage(); y = 50; }
-        doc.text(new Date(entry.date).toLocaleDateString('en-IN'), 50, y, { width: 70 });
-        doc.text(entry.referenceNumber, 120, y, { width: 80 });
-        doc.text(entry.transactionType.replace(/_/g, ' '), 200, y, { width: 80 });
-        doc.text(entry.debit > 0 ? entry.debit.toFixed(2) : '-', 290, y, { width: 60 });
-        doc.text(entry.credit > 0 ? entry.credit.toFixed(2) : '-', 350, y, { width: 60 });
-        doc.text(entry.runningBalance.toFixed(2), 410, y, { width: 70 });
-        y += 15;
-      }
-
-      doc.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
 };
 
 export const setOpeningBalance = async (
