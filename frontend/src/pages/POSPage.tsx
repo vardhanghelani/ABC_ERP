@@ -117,15 +117,14 @@ export default function POSPage() {
           return prev
         }
         draftLineToClear = existing.lineId
-        return prev.map((i) =>
-          i.lineId === existing.lineId ? { ...i, quantity: nextQty, unitPrice, product } : i
-        )
+        const updated = { ...existing, quantity: nextQty, unitPrice, product }
+        return [updated, ...prev.filter((i) => i.lineId !== existing.lineId)]
       }
       if (step > product.currentStock) {
         toast.error(`Need at least ${step.toLocaleString('en-IN')} pcs — only ${product.currentStock.toLocaleString('en-IN')} in stock`)
         return prev
       }
-      return [...prev, createCartLine(product, step)]
+      return [createCartLine(product, step), ...prev]
     })
 
     if (draftLineToClear) {
