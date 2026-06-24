@@ -14,6 +14,7 @@ export interface Category {
   _id: string
   name: string
   code: string
+  barcodePrefix?: string
   description?: string
   isActive: boolean
   sortOrder: number

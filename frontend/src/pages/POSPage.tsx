@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi, postApi, downloadAuthenticated } from '@/lib/api'
@@ -23,6 +23,11 @@ import { ProductSpecHighlight } from '@/components/pos/ProductSpecBadges'
 import { ImportantField, importantInputClass, importantQtyClass } from '@/components/ui/important-field'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { usePosProductCache } from '@/hooks/usePosProductCache'
+import { usePosTopSellers } from '@/hooks/usePosTopSellers'
+import { usePosBarcodeScanner } from '@/hooks/usePosBarcodeScanner'
+import { normalizeScannedBarcode } from '@/lib/posBarcode'
+import { playScanError, playScanSuccess } from '@/lib/posScanSounds'
+import { logPosScanPerformance } from '@/lib/posScanPerformance'
 import {
   buildQuickPickProducts,
   findProductByBarcodeLocally,
@@ -84,7 +89,15 @@ export default function POSPage() {
     searchRef.current?.focus()
   }, [])
 
+  const refocusSearch = useCallback(() => {
+    requestAnimationFrame(() => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    })
+  }, [])
+
   const { data: productCache, isLoading: cacheLoading, isError: cacheError } = usePosProductCache()
+  const { data: topSellers } = usePosTopSellers()
 
   const localSearchResults = useMemo(() => {
     if (!productCache?.products || debouncedSearch.length < 2) return []
@@ -104,9 +117,9 @@ export default function POSPage() {
   const quickPickProducts = useMemo(
     () =>
       productCache?.products
-        ? buildQuickPickProducts(productCache.products, productCache.topProductIds)
+        ? buildQuickPickProducts(productCache.products, topSellers?.productIds ?? [])
         : [],
-    [productCache]
+    [productCache, topSellers?.productIds]
   )
 
   const isLongTermAcc = selectedCustomer?.creditTermType === 'long_term'
@@ -165,6 +178,7 @@ export default function POSPage() {
 
     setSearch('')
     rememberRecentProduct(productId)
+    refocusSearch()
   }
 
   const stepQty = (lineId: string, direction: 1 | -1) => {
@@ -185,6 +199,7 @@ export default function POSPage() {
       })
       return prev.map((i) => (i.lineId === lineId ? { ...i, quantity: next } : i))
     })
+    refocusSearch()
   }
 
   const setItemQuantityDraft = (lineId: string, raw: string) => {
@@ -205,6 +220,7 @@ export default function POSPage() {
       delete next[lineId]
       return next
     })
+    refocusSearch()
   }
 
   const removeFromCart = (lineId: string) => {
@@ -399,25 +415,79 @@ export default function POSPage() {
     completeSale.mutate()
   }
 
-  const handleBarcodeSearch = async (barcode: string) => {
-    const code = barcode.trim()
-    if (!code) return
+  const handleBarcodeScan = useCallback(
+    async (rawCode: string, detection: { scanDetectionMs: number }) => {
+      const code = normalizeScannedBarcode(rawCode)
+      if (!code) return
 
-    const cached = productCache?.products
-      ? findProductByBarcodeLocally(productCache.products, code)
-      : undefined
-    if (cached) {
-      addToCart(cached)
-      return
-    }
+      const totalStart = performance.now()
+      const cacheStart = performance.now()
+      const cached = productCache?.products
+        ? findProductByBarcodeLocally(productCache.products, code)
+        : undefined
+      const cacheLookupMs = performance.now() - cacheStart
 
-    try {
-      const product = await fetchApi<Product>(`/products/barcode/${encodeURIComponent(code)}`)
-      addToCart(product)
-    } catch {
-      toast.error('Product not found')
-    }
-  }
+      setSearch('')
+
+      if (cached) {
+        const addStart = performance.now()
+        addToCart(cached)
+        const addToCartMs = performance.now() - addStart
+        playScanSuccess()
+        toast.success(`${cached.name} added`)
+        logPosScanPerformance({
+          scanDetectionMs: detection.scanDetectionMs,
+          cacheLookupMs,
+          addToCartMs,
+          totalMs: performance.now() - totalStart,
+          source: 'cache',
+          barcode: code,
+        })
+        return
+      }
+
+      try {
+        const apiStart = performance.now()
+        const product = await fetchApi<Product>(`/products/barcode/${encodeURIComponent(code)}`)
+        const apiLookupMs = performance.now() - apiStart
+        const addStart = performance.now()
+        addToCart(product)
+        const addToCartMs = performance.now() - addStart
+        playScanSuccess()
+        toast.success(`${product.name} added`)
+        logPosScanPerformance({
+          scanDetectionMs: detection.scanDetectionMs,
+          cacheLookupMs: cacheLookupMs + apiLookupMs,
+          addToCartMs,
+          totalMs: performance.now() - totalStart,
+          source: 'api',
+          barcode: code,
+        })
+      } catch {
+        playScanError()
+        toast.error('Product not found')
+        logPosScanPerformance({
+          scanDetectionMs: detection.scanDetectionMs,
+          cacheLookupMs,
+          addToCartMs: 0,
+          totalMs: performance.now() - totalStart,
+          source: 'miss',
+          barcode: code,
+        })
+        refocusSearch()
+      }
+    },
+    [productCache?.products, refocusSearch]
+  )
+
+  const searchValueRef = useRef('')
+  searchValueRef.current = search
+
+  const { handleKeyDown: handleScanKeyDown } = usePosBarcodeScanner({
+    onScan: handleBarcodeScan,
+    getValue: () => searchValueRef.current,
+    enabled: !saleLocked,
+  })
 
   const completeButtonLabel = () => {
     if (paymentMode === 'credit') return `Complete on Credit — ${formatCurrency(totals.total)}`
@@ -468,7 +538,7 @@ export default function POSPage() {
             <CardContent className="p-4">
               <ImportantField
                 label="Search Product / Scan Barcode"
-                hint="Type name or SKU — press Enter after scanning barcode"
+                hint="Scan barcode or type name/SKU — scanner auto-detects rapid input"
                 variant="primary"
                 className="border-0 bg-transparent p-0 shadow-none ring-0"
               >
@@ -479,8 +549,9 @@ export default function POSPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && search.length >= 8) handleBarcodeSearch(search)
+                    handleScanKeyDown(e)
                   }}
+                  autoComplete="off"
                 />
               </ImportantField>
               {search.length >= 2 && searchResults.length > 0 && (

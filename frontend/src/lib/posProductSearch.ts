@@ -1,4 +1,5 @@
 import type { Product } from '@/types'
+import { normalizeScannedBarcode } from '@/lib/posBarcode'
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -77,8 +78,15 @@ export interface PosProductCachePayload {
   products: Product[]
   version: string
   count: number
-  topProductIds: string[]
 }
+
+export interface PosTopSellersPayload {
+  productIds: string[]
+  version: string
+}
+
+export const POS_PRODUCT_CACHE_KEY = '/products/pos-cache'
+export const POS_TOP_SELLERS_KEY = '/products/top-sellers'
 
 export function searchPosProductsLocally(
   products: Product[],
@@ -94,10 +102,12 @@ export function findProductByBarcodeLocally(
   products: Product[],
   code: string
 ): Product | undefined {
-  const normalized = code.trim()
+  const normalized = normalizeScannedBarcode(code)
   if (!normalized) return undefined
   return products.find(
-    (p) => p.barcode === normalized || p.sku.toUpperCase() === normalized.toUpperCase()
+    (p) =>
+      normalizeScannedBarcode(p.barcode ?? '') === normalized ||
+      p.sku.toUpperCase() === normalized.toUpperCase()
   )
 }
 

@@ -1,22 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchApiWithEtag } from '@/lib/api'
 import {
-  POS_PRODUCT_CACHE_KEY,
-  type PosProductCachePayload,
+  POS_TOP_SELLERS_KEY,
+  type PosTopSellersPayload,
 } from '@/lib/posProductSearch'
 
-export function usePosProductCache() {
+export function usePosTopSellers() {
   return useQuery({
-    queryKey: ['pos-product-cache'],
+    queryKey: ['pos-top-sellers'],
     queryFn: async ({ signal }) => {
-      const result = await fetchApiWithEtag<PosProductCachePayload>(POS_PRODUCT_CACHE_KEY, {
+      const result = await fetchApiWithEtag<PosTopSellersPayload>(POS_TOP_SELLERS_KEY, {
         signal,
-        cacheKey: POS_PRODUCT_CACHE_KEY,
+        cacheKey: POS_TOP_SELLERS_KEY,
       })
       return result.data
     },
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
-    retry: 2,
+    retry: 1,
   })
 }

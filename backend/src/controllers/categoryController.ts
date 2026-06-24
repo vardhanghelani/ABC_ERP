@@ -10,6 +10,24 @@ import { logAudit } from '../middleware/auditLog';
 import { paramId } from '../utils/params';
 import { AuditAction } from '../models/AuditLog';
 import { nameToFieldKey } from '../utils/fieldKey';
+import {
+  deriveBarcodePrefixFromCode,
+  ensureUniqueBarcodePrefix,
+} from '../services/categoryBarcodeService';
+
+const BARCODE_PREFIX_PATTERN = /^[A-Z]{3}$/;
+
+const resolveCategoryBarcodePrefix = async (
+  code: string,
+  requested?: string,
+  excludeCategoryId?: mongoose.Types.ObjectId
+): Promise<string> => {
+  const desired = (requested || deriveBarcodePrefixFromCode(code)).toUpperCase().slice(0, 3);
+  if (!BARCODE_PREFIX_PATTERN.test(desired)) {
+    throw new ApiError(400, 'Barcode prefix must be exactly 3 uppercase letters');
+  }
+  return ensureUniqueBarcodePrefix(desired, excludeCategoryId);
+};
 
 export const inlineFieldSchema = z.object({
   name: z.string().min(1),
@@ -21,9 +39,24 @@ export const inlineFieldSchema = z.object({
 export const categorySchema = z.object({
   name: z.string().min(1),
   code: z.string().min(1).max(10),
+  barcodePrefix: z
+    .string()
+    .regex(/^[A-Za-z]{3}$/, 'Barcode prefix must be exactly 3 letters')
+    .optional(),
   description: z.string().optional(),
   sortOrder: z.number().optional(),
   fields: z.array(inlineFieldSchema).optional(),
+});
+
+export const updateCategorySchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  sortOrder: z.number().optional(),
+  isActive: z.boolean().optional(),
+  barcodePrefix: z
+    .string()
+    .regex(/^[A-Za-z]{3}$/, 'Barcode prefix must be exactly 3 letters')
+    .optional(),
 });
 
 export const fieldSchema = z.object({
@@ -87,10 +120,13 @@ export const createCategory = asyncHandler(async (req: AuthRequest, res: Respons
   if (existing) throw new ApiError(409, 'Category code already exists');
 
   const { fields: inlineFields, ...categoryData } = req.body;
+  const code = req.body.code.toUpperCase();
+  const barcodePrefix = await resolveCategoryBarcodePrefix(code, req.body.barcodePrefix);
 
   const category = await Category.create({
     ...categoryData,
-    code: req.body.code.toUpperCase(),
+    code,
+    barcodePrefix,
     createdBy: req.user!._id,
   });
 
@@ -112,8 +148,30 @@ export const createCategory = asyncHandler(async (req: AuthRequest, res: Respons
 });
 
 export const updateCategory = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const category = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  const category = await Category.findById(req.params.id);
   if (!category) throw new ApiError(404, 'Category not found');
+
+  const { name, description, sortOrder, isActive, barcodePrefix } = req.body;
+
+  if (name !== undefined) category.name = name;
+  if (description !== undefined) category.description = description;
+  if (sortOrder !== undefined) category.sortOrder = sortOrder;
+  if (isActive !== undefined) category.isActive = isActive;
+
+  if (barcodePrefix !== undefined) {
+    const normalized = barcodePrefix.toUpperCase();
+    if (!BARCODE_PREFIX_PATTERN.test(normalized)) {
+      throw new ApiError(400, 'Barcode prefix must be exactly 3 uppercase letters');
+    }
+    const duplicate = await Category.findOne({
+      barcodePrefix: normalized,
+      _id: { $ne: category._id },
+    });
+    if (duplicate) throw new ApiError(409, `Barcode prefix "${normalized}" is already in use`);
+    category.barcodePrefix = normalized;
+  }
+
+  await category.save();
   await logAudit(req, AuditAction.UPDATE, 'Category', category._id.toString(), req.body);
   ApiResponse.success(res, category, 'Category updated');
 });

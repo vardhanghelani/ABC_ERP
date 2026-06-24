@@ -62,6 +62,70 @@ export async function fetchApi<T>(
   return data.data
 }
 
+export interface EtagFetchResult<T> {
+  data: T
+  etag: string | null
+  notModified: boolean
+  bytesTransferred: number
+}
+
+/** GET with If-None-Match support — returns cached body on 304. */
+export async function fetchApiWithEtag<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal
+    etag?: string | null
+    cacheKey?: string
+  }
+): Promise<EtagFetchResult<T>> {
+  const storageKey = options?.cacheKey ?? url
+  const headers: Record<string, string> = {}
+  const etag = options?.etag ?? sessionStorage.getItem(`${storageKey}:etag`)
+  if (etag) headers['If-None-Match'] = etag
+
+  const response = await api.get<ApiResponse<T>>(url, {
+    signal: options?.signal,
+    headers,
+    validateStatus: (status) => status === 200 || status === 304,
+  })
+
+  const responseEtag = typeof response.headers.etag === 'string' ? response.headers.etag : null
+
+  if (response.status === 304) {
+    const stored = sessionStorage.getItem(`${storageKey}:body`)
+    if (!stored) {
+      throw new Error(`Catalog cache missing for 304 response (${url})`)
+    }
+    return {
+      data: JSON.parse(stored) as T,
+      etag: etag ?? responseEtag,
+      notModified: true,
+      bytesTransferred: 0,
+    }
+  }
+
+  const data = response.data.data
+  if (responseEtag) sessionStorage.setItem(`${storageKey}:etag`, responseEtag)
+  sessionStorage.setItem(`${storageKey}:body`, JSON.stringify(data))
+
+  const rawLength =
+    typeof response.headers['content-length'] === 'string'
+      ? parseInt(response.headers['content-length'], 10)
+      : JSON.stringify(response.data).length
+
+  return {
+    data,
+    etag: responseEtag,
+    notModified: false,
+    bytesTransferred: Number.isFinite(rawLength) ? rawLength : JSON.stringify(response.data).length,
+  }
+}
+
+export function clearEtagCache(storageKey: string): void {
+  sessionStorage.removeItem(`${storageKey}:etag`)
+  sessionStorage.removeItem(`${storageKey}:body`)
+}
+
 export async function postApi<T>(
   url: string,
   body?: unknown,

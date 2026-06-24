@@ -42,7 +42,7 @@ router.delete('/auth/users/:id', authenticate, authorize(PERMISSIONS.USERS_DELET
 router.get('/categories', authenticate, authorize(PERMISSIONS.CATEGORIES_VIEW), category.getCategories);
 router.get('/categories/:id', authenticate, authorize(PERMISSIONS.CATEGORIES_VIEW), category.getCategory);
 router.post('/categories', authenticate, authorize(PERMISSIONS.CATEGORIES_CREATE), validate(category.categorySchema), category.createCategory);
-router.put('/categories/:id', authenticate, authorize(PERMISSIONS.CATEGORIES_UPDATE), category.updateCategory);
+router.put('/categories/:id', authenticate, authorize(PERMISSIONS.CATEGORIES_UPDATE), validate(category.updateCategorySchema), category.updateCategory);
 router.delete('/categories/:id', authenticate, authorize(PERMISSIONS.CATEGORIES_DELETE), category.deleteCategory);
 router.get('/categories/:id/fields', authenticate, authorize(PERMISSIONS.CATEGORIES_VIEW), category.getCategoryFields);
 router.get('/categories/:id/fields/:fieldId', authenticate, authorize(PERMISSIONS.CATEGORIES_VIEW), category.getCategoryField);
@@ -53,8 +53,10 @@ router.delete('/categories/:id/fields/:fieldId', authenticate, authorize(PERMISS
 // Products
 router.get('/products', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProducts);
 router.get('/products/pos-cache', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getPosProductCache);
+router.get('/products/top-sellers', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getTopSellers);
 router.get('/products/search', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.advancedSearch);
 router.get('/products/barcode/:barcode', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProductByBarcode);
+router.get('/products/:id/barcode/preview', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProductBarcodePreview);
 router.get('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProduct);
 router.post('/products', authenticate, authorize(PERMISSIONS.PRODUCTS_CREATE), validate(product.productSchema), product.createProduct);
 router.put('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), validate(product.updateProductSchema), product.updateProduct);

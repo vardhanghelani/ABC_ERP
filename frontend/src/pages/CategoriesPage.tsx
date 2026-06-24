@@ -31,7 +31,7 @@ export default function CategoriesPage() {
   const [showForm, setShowForm] = useState(false)
   const [fieldMode, setFieldMode] = useState<'list' | 'create' | 'edit'>('list')
   const [editingField, setEditingField] = useState<CategoryField | null>(null)
-  const [form, setForm] = useState({ name: '', code: '', description: '' })
+  const [form, setForm] = useState({ name: '', code: '', barcodePrefix: '', description: '' })
   const [inlineFields, setInlineFields] = useState<InlineFieldDraft[]>([newFieldDraft()])
   const [fieldForm, setFieldForm] = useState<FieldFormValues>(emptyFieldForm())
 
@@ -62,12 +62,16 @@ export default function CategoriesPage() {
       const fields = inlineFields
         .filter((f) => f.name.trim())
         .map(({ name, fieldType, required }) => ({ name: name.trim(), fieldType, required }))
-      return postApi('/categories', { ...form, fields })
+      return postApi('/categories', {
+        ...form,
+        barcodePrefix: form.barcodePrefix || form.code.slice(0, 3),
+        fields,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] })
       setShowForm(false)
-      setForm({ name: '', code: '', description: '' })
+      setForm({ name: '', code: '', barcodePrefix: '', description: '' })
       setInlineFields([newFieldDraft()])
       toast.success('Category and fields created')
     },
@@ -158,9 +162,19 @@ export default function CategoriesPage() {
           </div>
         }
       >
-        <div className="grid gap-4 sm:grid-cols-3 mb-6">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
           <div><Label>Category Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. AD Stones" /></div>
-          <div><Label>Code *</Label><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. ADS" maxLength={10} /></div>
+          <div><Label>Code *</Label><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase(), barcodePrefix: form.barcodePrefix || e.target.value.toUpperCase().slice(0, 3) })} placeholder="e.g. ADS" maxLength={10} /></div>
+          <div>
+            <Label>Barcode Prefix *</Label>
+            <Input
+              value={form.barcodePrefix || form.code.slice(0, 3)}
+              onChange={(e) => setForm({ ...form, barcodePrefix: e.target.value.toUpperCase().slice(0, 3) })}
+              placeholder="e.g. ADS"
+              maxLength={3}
+            />
+            <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-muted)]">3 uppercase letters — used in product barcodes (ADS-000001)</p>
+          </div>
           <div><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
         </div>
         {form.code && form.code !== 'CHN' && (
@@ -179,6 +193,7 @@ export default function CategoriesPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Code</TableHead>
+                    <TableHead>Prefix</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead align="center">Fields</TableHead>
                   </TableRow>
@@ -188,6 +203,7 @@ export default function CategoriesPage() {
                     <TableRow key={cat._id} selected={selectedCategory === cat._id} onClick={() => { setSelectedCategory(cat._id); resetFieldPanel() }}>
                       <TableCell className="font-medium">{cat.name}</TableCell>
                       <TableCell><Badge variant="muted">{cat.code}</Badge></TableCell>
+                      <TableCell><Badge variant="muted">{cat.barcodePrefix || cat.code.slice(0, 3)}</Badge></TableCell>
                       <TableCell><Badge variant={cat.isActive ? 'success' : 'danger'}>{cat.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
                       <TableCell align="center">
                         <Button size="sm" variant="ghost" iconOnly onClick={(e) => { e.stopPropagation(); setSelectedCategory(cat._id); resetFieldPanel() }}>

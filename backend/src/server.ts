@@ -3,10 +3,14 @@ import { connectDB } from './config/database';
 import { env } from './config/env';
 import { ensureUserLoginIds } from './services/userMigrationService';
 import { ensureProductSearchText } from './services/productSearchTextService';
+import { ensureCategoryBarcodePrefixes } from './services/categoryBarcodeService';
+import { syncBarcodeSequencesFromProducts } from './services/barcodeSequenceService';
 
 const start = async () => {
   await connectDB();
   await ensureUserLoginIds();
+  await ensureCategoryBarcodePrefixes();
+  await syncBarcodeSequencesFromProducts();
   await ensureProductSearchText();
 
   app.listen(env.port, () => {

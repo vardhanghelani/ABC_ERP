@@ -1,20 +1,25 @@
 import { performance } from 'node:perf_hooks';
 import { Response } from 'express';
 import { z } from 'zod';
+import mongoose from 'mongoose';
 import { Product, Category, CategoryField } from '../models';
+import type { IProduct } from '../models/Product';
 import { AuthRequest } from '../middleware/auth';
 import { ApiError } from '../utils/ApiError';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { logAudit } from '../middleware/auditLog';
 import { AuditAction } from '../models/AuditLog';
-import { generateUniqueBarcode, generateSKU } from '../services/barcodeService';
+import { generateSKU, generateBarcode, resolveProductBarcode } from '../services/barcodeService';
+import { normalizeBarcodeValue } from '../services/barcodeSequenceService';
 import { paramId } from '../utils/params';
 import { cloudinary } from '../config/cloudinary';
 import { validateProductAttributes } from '../utils/validateAttributes';
 import { updateStock } from '../services/stockService';
 import { InventoryTransactionType } from '../models/InventoryTransaction';
 import { searchProductsMongo, findProductByBarcode, getPosProductCache as loadPosProductCache } from '../services/productSearchService';
+import { computePosCacheVersion } from '../services/posCacheVersionService';
+import { computeTopSellersVersion, getTopSellerProductIds } from '../services/posTopSellersService';
 import { refreshProductSearchText, buildProductSearchText } from '../services/productSearchTextService';
 import {
   createProductSearchTimer,
@@ -45,7 +50,10 @@ export const productSchema = z.object({
   warehouse: z.string().optional(),
   unitType: z.string().optional(),
   sku: z.string().optional(),
-  barcode: z.string().optional(),
+  barcode: z
+    .string()
+    .regex(/^[A-Za-z]{3}-\d{6}$/, 'Barcode must match PREFIX-000001 format')
+    .optional(),
 });
 
 export const getProducts = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -100,7 +108,7 @@ export const getProduct = asyncHandler(async (req: AuthRequest, res: Response) =
 });
 
 export const getProductByBarcode = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const barcode = paramId(req.params.barcode);
+  const barcode = normalizeBarcodeValue(paramId(req.params.barcode));
   const timer = createProductSearchTimer();
   const mongoStart = performance.now();
   const product = await findProductByBarcode(barcode);
@@ -130,18 +138,50 @@ export const getProductByBarcode = asyncHandler(async (req: AuthRequest, res: Re
 
 export const getPosProductCache = asyncHandler(async (req: AuthRequest, res: Response) => {
   const timer = createProductSearchTimer();
+  const ifNoneMatch = req.headers['if-none-match'] as string | undefined;
+
+  res.set('Cache-Control', 'private, max-age=60');
+
+  if (ifNoneMatch) {
+    const version = await computePosCacheVersion();
+    const etag = `"${version}"`;
+    res.set('ETag', etag);
+
+    if (ifNoneMatch === etag) {
+      res.status(304).end();
+      return;
+    }
+
+    const mongoStart = performance.now();
+    const cache = await loadPosProductCache(version);
+    const mongoEnd = performance.now();
+
+    const serializeStart = performance.now();
+    ApiResponse.success(res, cache);
+    const serializationMs = performance.now() - serializeStart;
+    const responseSendStart = performance.now();
+
+    res.once('finish', () => {
+      logProductSearchPerformance({
+        query: 'pos-cache',
+        mode: 'cache-stale',
+        mongoQueryMs: mongoEnd - mongoStart,
+        populateMs: 0,
+        formattingMs: 0,
+        serializationMs,
+        responseSendMs: performance.now() - responseSendStart,
+        totalMs: timer.elapsedMs(),
+        resultCount: cache.count,
+      });
+    });
+    return;
+  }
+
   const mongoStart = performance.now();
   const cache = await loadPosProductCache();
   const mongoEnd = performance.now();
 
-  const etag = `"${cache.version}"`;
-  res.set('Cache-Control', 'private, max-age=60');
-  res.set('ETag', etag);
-
-  if (req.headers['if-none-match'] === etag) {
-    res.status(304).end();
-    return;
-  }
+  res.set('ETag', `"${cache.version}"`);
 
   const serializeStart = performance.now();
   ApiResponse.success(res, cache);
@@ -161,6 +201,22 @@ export const getPosProductCache = asyncHandler(async (req: AuthRequest, res: Res
       resultCount: cache.count,
     });
   });
+});
+
+export const getTopSellers = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const version = await computeTopSellersVersion();
+  const etag = `"${version}"`;
+
+  res.set('Cache-Control', 'private, max-age=300');
+  res.set('ETag', etag);
+
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  const productIds = await getTopSellerProductIds();
+  ApiResponse.success(res, { productIds, version });
 });
 
 export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -211,6 +267,9 @@ export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Respons
 export const createProduct = asyncHandler(async (req: AuthRequest, res: Response) => {
   const category = await Category.findById(req.body.category);
   if (!category) throw new ApiError(404, 'Category not found');
+  if (!category.barcodePrefix) {
+    throw new ApiError(400, 'Category barcode prefix is not configured');
+  }
 
   // Validate dynamic attributes against category fields
   const fields = await CategoryField.find({ category: category._id, isActive: true });
@@ -220,41 +279,65 @@ export const createProduct = asyncHandler(async (req: AuthRequest, res: Response
   );
 
   const sku = req.body.sku || generateSKU(category.code);
-  const barcode = req.body.barcode || generateUniqueBarcode();
   const openingStock = sanitizeInteger(req.body.openingStock, 0);
-  const { openingStock: _omit, ...productData } = req.body;
+  const { openingStock: _omit, barcode: overrideBarcode, ...productData } = req.body;
 
-  const product = await Product.create({
-    ...productData,
-    sku: sku.toUpperCase(),
-    barcode,
-    attributes: normalizedAttributes,
-    searchText: buildProductSearchText({
-      ...productData,
-      sku: sku.toUpperCase(),
-      barcode,
-      attributes: normalizedAttributes,
-      category: { name: category.name, code: category.code },
-    }),
-    createdBy: req.user!._id,
-  });
+  const session = await mongoose.startSession();
+  let createdProduct: IProduct | null = null;
+
+  try {
+    await session.withTransaction(async () => {
+      const barcode = await resolveProductBarcode(category, {
+        overrideBarcode,
+        session,
+      });
+
+      const [product] = await Product.create(
+        [
+          {
+            ...productData,
+            sku: sku.toUpperCase(),
+            barcode,
+            attributes: normalizedAttributes,
+            searchText: buildProductSearchText({
+              ...productData,
+              sku: sku.toUpperCase(),
+              barcode,
+              attributes: normalizedAttributes,
+              category: { name: category.name, code: category.code },
+            }),
+            createdBy: req.user!._id,
+          },
+        ],
+        { session }
+      );
+
+      createdProduct = product;
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  if (!createdProduct) throw new ApiError(500, 'Failed to create product');
+
+  const savedProduct = createdProduct as IProduct;
 
   if (openingStock > 0) {
     await updateStock({
-      productId: product._id.toString(),
+      productId: savedProduct._id.toString(),
       type: InventoryTransactionType.STOCK_IN,
       quantity: openingStock,
       userId: req.user!._id.toString(),
-      reference: product.sku,
-      referenceId: product._id.toString(),
+      reference: savedProduct.sku,
+      referenceId: savedProduct._id.toString(),
       referenceModel: 'Product',
       notes: 'Opening stock on product creation',
     });
   }
 
-  const created = openingStock > 0 ? await Product.findById(product._id) : product;
+  const created = openingStock > 0 ? await Product.findById(savedProduct._id) : savedProduct;
 
-  await logAudit(req, AuditAction.CREATE, 'Product', product._id.toString(), openingStock > 0 ? { openingStock } : undefined);
+  await logAudit(req, AuditAction.CREATE, 'Product', savedProduct._id.toString(), openingStock > 0 ? { openingStock } : undefined);
   ApiResponse.success(res, created, 'Product created', 201);
 });
 
@@ -306,7 +389,11 @@ export const updateProduct = asyncHandler(async (req: AuthRequest, res: Response
     }
   }
 
-  const updated = await Product.findByIdAndUpdate(req.params.id, updateBody, { new: true, runValidators: true });
+  const updated = await Product.findByIdAndUpdate(req.params.id, updateBody, {
+    new: true,
+    runValidators: true,
+    timestamps: true,
+  });
   if (!updated) throw new ApiError(404, 'Product not found');
   await refreshProductSearchText(updated._id.toString());
   await logAudit(req, AuditAction.UPDATE, 'Product', updated._id.toString(), req.body);
@@ -333,6 +420,20 @@ export const reactivateProduct = asyncHandler(async (req: AuthRequest, res: Resp
   await refreshProductSearchText(product._id.toString());
   await logAudit(req, AuditAction.UPDATE, 'Product', product._id.toString(), { status: 'active' });
   ApiResponse.success(res, product, 'Product reactivated');
+});
+
+export const getProductBarcodePreview = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const product = await Product.findById(req.params.id).select('barcode name sku');
+  if (!product) throw new ApiError(404, 'Product not found');
+  if (!product.barcode) throw new ApiError(404, 'Product has no barcode');
+
+  const image = await generateBarcode(product.barcode);
+  ApiResponse.success(res, {
+    barcode: product.barcode,
+    image,
+    name: product.name,
+    sku: product.sku,
+  });
 });
 
 export const uploadProductImage = asyncHandler(async (req: AuthRequest, res: Response) => {

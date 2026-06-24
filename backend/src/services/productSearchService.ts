@@ -1,9 +1,10 @@
 import { performance } from 'node:perf_hooks';
 import mongoose from 'mongoose';
 import { Product } from '../models';
-import { Sale } from '../models/Sale';
 import { escapeRegex, productMatchesQuery, type SearchableProduct } from './productSearchTokens';
 import type { ProductSearchTimings } from '../utils/productSearchPerformance';
+import { computePosCacheVersion } from './posCacheVersionService';
+import { normalizeBarcodeValue } from './barcodeSequenceService';
 
 export { escapeRegex, productMatchesQuery, collectSearchTokens, type SearchableProduct } from './productSearchTokens';
 
@@ -102,42 +103,39 @@ export async function searchProductsComprehensive(
   return searchProductsMongo(query, { ...options, comprehensive: true });
 }
 
-export async function getPosProductCache(): Promise<{
+export async function getPosProductCache(precomputedVersion?: string): Promise<{
   products: PosCacheProduct[];
   version: string;
   count: number;
-  topProductIds: string[];
 }> {
-  const [products, topSold] = await Promise.all([
-    Product.find({ status: 'active' })
-      .select(POS_PRODUCT_SELECT)
-      .sort({ name: 1 })
-      .lean(),
-    Sale.aggregate<{ _id: mongoose.Types.ObjectId }>([
-      { $match: { status: 'completed', createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } },
-      { $unwind: '$items' },
-      { $group: { _id: '$items.product', totalQty: { $sum: '$items.quantity' } } },
-      { $sort: { totalQty: -1 } },
-      { $limit: 15 },
-    ]),
-  ]);
+  const productsPromise = Product.find({ status: 'active' })
+    .select(POS_PRODUCT_SELECT)
+    .sort({ name: 1 })
+    .lean();
 
+  if (precomputedVersion) {
+    const products = await productsPromise;
+    const typed = products as unknown as PosCacheProduct[];
+    return {
+      products: typed,
+      count: typed.length,
+      version: precomputedVersion,
+    };
+  }
+
+  const [products, version] = await Promise.all([productsPromise, computePosCacheVersion()]);
   const typed = products as unknown as PosCacheProduct[];
-  const maxUpdated = typed.reduce((max, p) => {
-    const ts = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
-    return Math.max(max, ts);
-  }, 0);
 
   return {
     products: typed,
     count: typed.length,
-    version: `${typed.length}-${maxUpdated}`,
-    topProductIds: topSold.map((row) => String(row._id)),
+    version,
   };
 }
 
 export async function findProductByBarcode(barcode: string): Promise<SearchableProduct | null> {
-  const product = await Product.findOne({ barcode, status: 'active' })
+  const normalized = normalizeBarcodeValue(barcode);
+  const product = await Product.findOne({ barcode: normalized, status: 'active' })
     .select(POS_PRODUCT_SELECT)
     .lean();
   return product as SearchableProduct | null;

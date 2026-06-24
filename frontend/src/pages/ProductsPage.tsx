@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/table'
 import { Plus, Download, Settings2, Pencil, Trash2, Archive } from 'lucide-react'
 import { ProductSpecBadges } from '@/components/pos/ProductSpecBadges'
+import { ProductBarcodeLabel } from '@/components/products/ProductBarcodeLabel'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -322,11 +323,16 @@ export default function ProductsPage() {
         }
       >
         {editingProduct && (
-          <div className="mb-4 flex flex-wrap gap-3 rounded-[var(--radius-md)] border border-[var(--color-border-soft)] bg-[var(--color-bg-sunken)] px-4 py-3 text-[var(--text-sm)]">
-            <span><strong>SKU:</strong> {editingProduct.sku}</span>
-            <span><strong>Current stock:</strong> {editingProduct.currentStock?.toLocaleString('en-IN') ?? 0} pcs</span>
-            <span className="text-[var(--color-text-muted)]">Change stock via Stock Movements or Purchase Receive</span>
-          </div>
+          <>
+            <div className="mb-4 flex flex-wrap gap-3 rounded-[var(--radius-md)] border border-[var(--color-border-soft)] bg-[var(--color-bg-sunken)] px-4 py-3 text-[var(--text-sm)]">
+              <span><strong>SKU:</strong> {editingProduct.sku}</span>
+              <span><strong>Current stock:</strong> {editingProduct.currentStock?.toLocaleString('en-IN') ?? 0} pcs</span>
+              <span className="text-[var(--color-text-muted)]">Change stock via Stock Movements or Purchase Receive</span>
+            </div>
+            <div className="mb-5">
+              <ProductBarcodeLabel productId={editingProduct._id} />
+            </div>
+          </>
         )}
         <p className="mb-5 text-[var(--text-sm)] text-[var(--color-text-muted)]">
           Select category first — its specification fields appear automatically. You can add new fields without leaving this form.

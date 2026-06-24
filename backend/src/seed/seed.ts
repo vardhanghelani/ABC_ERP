@@ -34,11 +34,11 @@ const seed = async () => {
 
   // Sample Categories
   const categories = [
-    { name: 'Chains', code: 'CHN', description: 'Imitation jewellery chains' },
-    { name: 'AD Stones', code: 'ADS', description: 'American Diamond stones' },
-    { name: 'Glass Stones', code: 'GLS', description: 'Glass stones and beads' },
-    { name: 'Marble Pieces', code: 'MBL', description: 'Marble decorative pieces' },
-    { name: 'Metal Components', code: 'MTL', description: 'Metal findings and components' },
+    { name: 'Chains', code: 'CHN', barcodePrefix: 'CHN', description: 'Imitation jewellery chains' },
+    { name: 'AD Stones', code: 'ADS', barcodePrefix: 'ADS', description: 'American Diamond stones' },
+    { name: 'Glass Stones', code: 'GLS', barcodePrefix: 'GLS', description: 'Glass stones and beads' },
+    { name: 'Marble Pieces', code: 'MBL', barcodePrefix: 'MBL', description: 'Marble decorative pieces' },
+    { name: 'Metal Components', code: 'MTL', barcodePrefix: 'MTL', description: 'Metal findings and components' },
   ];
 
   for (const cat of categories) {

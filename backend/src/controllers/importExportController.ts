@@ -4,7 +4,7 @@ import { Product, Category, Customer } from '../models';
 import { AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
-import { generateUniqueBarcode, generateSKU } from '../services/barcodeService';
+import { generateSKU, resolveProductBarcode } from '../services/barcodeService';
 import { updateStock } from '../services/stockService';
 import { InventoryTransactionType } from '../models/InventoryTransaction';
 
@@ -76,6 +76,7 @@ export const bulkImportProducts = asyncHandler(async (req: AuthRequest, res: Res
       wholesalePrice?: number;
       retailPrice?: number;
       stock?: number;
+      barcode?: string;
       attributes?: Record<string, unknown>;
     }[];
   };
@@ -91,11 +92,15 @@ export const bulkImportProducts = asyncHandler(async (req: AuthRequest, res: Res
         continue;
       }
 
+      const barcode = await resolveProductBarcode(category, {
+        overrideBarcode: item.barcode,
+      });
+
       const product = await Product.create({
         name: item.name,
         sku: generateSKU(category.code),
         category: category._id,
-        barcode: generateUniqueBarcode(),
+        barcode,
         attributes: item.attributes || {},
         currentStock: 0,
         purchasePrice: item.purchasePrice || 0,
