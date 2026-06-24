@@ -49,8 +49,16 @@ export interface ApiResponse<T = unknown> {
   }
 }
 
-export async function fetchApi<T>(url: string, params?: Record<string, unknown>): Promise<T> {
-  const { data } = await api.get<ApiResponse<T>>(url, { params })
+export async function fetchApi<T>(
+  url: string,
+  params?: Record<string, unknown>,
+  options?: { signal?: AbortSignal; headers?: Record<string, string> }
+): Promise<T> {
+  const { data } = await api.get<ApiResponse<T>>(url, {
+    params,
+    signal: options?.signal,
+    headers: options?.headers,
+  })
   return data.data
 }
 

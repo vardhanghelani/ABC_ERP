@@ -14,11 +14,12 @@ import { cloudinary } from '../config/cloudinary';
 import { validateProductAttributes } from '../utils/validateAttributes';
 import { updateStock } from '../services/stockService';
 import { InventoryTransactionType } from '../models/InventoryTransaction';
-import { searchProductsComprehensive } from '../services/productSearchService';
+import { searchProductsMongo, findProductByBarcode, getPosProductCache as loadPosProductCache } from '../services/productSearchService';
+import { refreshProductSearchText, buildProductSearchText } from '../services/productSearchTextService';
 import {
   createProductSearchTimer,
+  createEmptySearchTimings,
   logProductSearchPerformance,
-  type ProductSearchTimings,
 } from '../utils/productSearchPerformance';
 import { sanitizeInteger, sanitizeMoney } from '../utils/numbers';
 
@@ -62,10 +63,11 @@ export const getProducts = asyncHandler(async (req: AuthRequest, res: Response) 
 
   const searchTerm = (req.query.search as string)?.trim();
   if (searchTerm && searchTerm.length >= 2) {
-    const results = await searchProductsComprehensive(searchTerm, {
+    const results = await searchProductsMongo(searchTerm, {
       limit: limit + skip,
       category: req.query.category as string | undefined,
       status: req.query.status as string | undefined,
+      comprehensive: true,
     });
     const paginated = results.slice(skip, skip + limit);
     return ApiResponse.paginated(res, paginated, { page, limit, total: results.length });
@@ -98,10 +100,112 @@ export const getProduct = asyncHandler(async (req: AuthRequest, res: Response) =
 });
 
 export const getProductByBarcode = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const product = await Product.findOne({ barcode: req.params.barcode, status: 'active' })
-    .populate('category', 'name code');
+  const barcode = paramId(req.params.barcode);
+  const timer = createProductSearchTimer();
+  const mongoStart = performance.now();
+  const product = await findProductByBarcode(barcode);
+  const mongoEnd = performance.now();
+
   if (!product) throw new ApiError(404, 'Product not found');
+
+  const serializeStart = performance.now();
   ApiResponse.success(res, product);
+  const serializationMs = performance.now() - serializeStart;
+  const responseSendStart = performance.now();
+
+  res.once('finish', () => {
+    logProductSearchPerformance({
+      query: barcode,
+      mode: 'barcode',
+      mongoQueryMs: mongoEnd - mongoStart,
+      populateMs: 0,
+      formattingMs: 0,
+      serializationMs,
+      responseSendMs: performance.now() - responseSendStart,
+      totalMs: timer.elapsedMs(),
+      resultCount: 1,
+    });
+  });
+});
+
+export const getPosProductCache = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const timer = createProductSearchTimer();
+  const mongoStart = performance.now();
+  const cache = await loadPosProductCache();
+  const mongoEnd = performance.now();
+
+  const etag = `"${cache.version}"`;
+  res.set('Cache-Control', 'private, max-age=60');
+  res.set('ETag', etag);
+
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  const serializeStart = performance.now();
+  ApiResponse.success(res, cache);
+  const serializationMs = performance.now() - serializeStart;
+  const responseSendStart = performance.now();
+
+  res.once('finish', () => {
+    logProductSearchPerformance({
+      query: 'pos-cache',
+      mode: 'cache',
+      mongoQueryMs: mongoEnd - mongoStart,
+      populateMs: 0,
+      formattingMs: 0,
+      serializationMs,
+      responseSendMs: performance.now() - responseSendStart,
+      totalMs: timer.elapsedMs(),
+      resultCount: cache.count,
+    });
+  });
+});
+
+export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const timer = createProductSearchTimer();
+  const q = (req.query.q as string)?.trim() || '';
+  const category = req.query.category as string | undefined;
+  const supplier = req.query.supplier as string | undefined;
+  const status = (req.query.status as string | undefined) || 'active';
+  const comprehensive = req.query.comprehensive !== 'false';
+
+  if (q.length < 2) {
+    ApiResponse.success(res, []);
+    return;
+  }
+
+  const timings = createEmptySearchTimings();
+  const products = await searchProductsMongo(q, {
+    limit: 50,
+    category,
+    supplier,
+    status,
+    timings,
+    comprehensive,
+  });
+
+  res.set('Cache-Control', 'private, no-cache');
+
+  const serializeStart = performance.now();
+  ApiResponse.success(res, products);
+  timings.serializationMs = performance.now() - serializeStart;
+  const responseSendStart = performance.now();
+
+  res.once('finish', () => {
+    logProductSearchPerformance({
+      query: q,
+      mode: comprehensive ? 'server-comprehensive' : 'server',
+      mongoQueryMs: timings.mongoQueryMs,
+      populateMs: timings.populateMs,
+      formattingMs: timings.formattingMs,
+      serializationMs: timings.serializationMs,
+      responseSendMs: performance.now() - responseSendStart,
+      totalMs: timer.elapsedMs(),
+      resultCount: products.length,
+    });
+  });
 });
 
 export const createProduct = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -125,6 +229,13 @@ export const createProduct = asyncHandler(async (req: AuthRequest, res: Response
     sku: sku.toUpperCase(),
     barcode,
     attributes: normalizedAttributes,
+    searchText: buildProductSearchText({
+      ...productData,
+      sku: sku.toUpperCase(),
+      barcode,
+      attributes: normalizedAttributes,
+      category: { name: category.name, code: category.code },
+    }),
     createdBy: req.user!._id,
   });
 
@@ -197,6 +308,7 @@ export const updateProduct = asyncHandler(async (req: AuthRequest, res: Response
 
   const updated = await Product.findByIdAndUpdate(req.params.id, updateBody, { new: true, runValidators: true });
   if (!updated) throw new ApiError(404, 'Product not found');
+  await refreshProductSearchText(updated._id.toString());
   await logAudit(req, AuditAction.UPDATE, 'Product', updated._id.toString(), req.body);
   ApiResponse.success(res, updated, 'Product updated');
 });
@@ -218,6 +330,7 @@ export const reactivateProduct = asyncHandler(async (req: AuthRequest, res: Resp
 
   product.status = 'active';
   await product.save();
+  await refreshProductSearchText(product._id.toString());
   await logAudit(req, AuditAction.UPDATE, 'Product', product._id.toString(), { status: 'active' });
   ApiResponse.success(res, product, 'Product reactivated');
 });
@@ -243,39 +356,4 @@ export const uploadProductImage = asyncHandler(async (req: AuthRequest, res: Res
   await product.save();
 
   ApiResponse.success(res, product, 'Image uploaded');
-});
-
-export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const timer = createProductSearchTimer();
-  const q = (req.query.q as string)?.trim() || '';
-  const category = req.query.category as string | undefined;
-  const supplier = req.query.supplier as string | undefined;
-  const status = (req.query.status as string | undefined) || 'active';
-
-  if (q.length < 2) {
-    ApiResponse.success(res, []);
-    return;
-  }
-
-  const timings: ProductSearchTimings = { mongoQueryMs: 0, formattingMs: 0 };
-  const products = await searchProductsComprehensive(q, {
-    limit: 50,
-    category,
-    supplier,
-    status,
-    timings,
-  });
-
-  const responseSendStart = performance.now();
-  res.once('finish', () => {
-    logProductSearchPerformance({
-      query: q,
-      mongoQueryMs: timings.mongoQueryMs,
-      formattingMs: timings.formattingMs,
-      responseSendMs: performance.now() - responseSendStart,
-      totalMs: timer.elapsedMs(),
-    });
-  });
-
-  ApiResponse.success(res, products);
 });

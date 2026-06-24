@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi, postApi, downloadAuthenticated } from '@/lib/api'
 import type { Product, Customer } from '@/types'
 import { formatBunchLabel, getMinimumBunch, getSellingPrice, snapToBunch } from '@/lib/productSales'
@@ -22,6 +22,13 @@ import { PosCustomerPicker } from '@/components/pos/PosCustomerPicker'
 import { ProductSpecHighlight } from '@/components/pos/ProductSpecBadges'
 import { ImportantField, importantInputClass, importantQtyClass } from '@/components/ui/important-field'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { usePosProductCache } from '@/hooks/usePosProductCache'
+import {
+  buildQuickPickProducts,
+  findProductByBarcodeLocally,
+  rememberRecentProduct,
+  searchPosProductsLocally,
+} from '@/lib/posProductSearch'
 import { Alert } from '@/components/ui/alert'
 import { StockBarInline } from '@/components/ui/stock-bar'
 import { formatCurrency, getAmountDue } from '@/lib/utils'
@@ -35,6 +42,7 @@ import {
   unlockPosSubmit,
 } from '@/lib/posSaleSubmit'
 import { Loader2, Trash2, Plus, Minus, CreditCard, Banknote, Smartphone, Printer, IndianRupee, Wallet } from 'lucide-react'
+import { invalidateProductQueries } from '@/lib/productQueries'
 import { toast } from 'sonner'
 
 interface CartItem extends PosCartLine {}
@@ -42,9 +50,10 @@ interface CartItem extends PosCartLine {}
 type PaymentMode = 'full' | 'partial' | 'credit'
 
 export default function POSPage() {
+  const queryClient = useQueryClient()
   const searchRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
-  const debouncedSearch = useDebouncedValue(search, 200)
+  const debouncedSearch = useDebouncedValue(search, 300)
   const [cart, setCart] = useState<CartItem[]>([])
   /** Per-line draft text while user types — avoids number input cross-talk and jumpy snaps */
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({})
@@ -75,12 +84,30 @@ export default function POSPage() {
     searchRef.current?.focus()
   }, [])
 
-  const { data: searchResults = [] } = useQuery({
+  const { data: productCache, isLoading: cacheLoading, isError: cacheError } = usePosProductCache()
+
+  const localSearchResults = useMemo(() => {
+    if (!productCache?.products || debouncedSearch.length < 2) return []
+    return searchPosProductsLocally(productCache.products, debouncedSearch)
+  }, [productCache?.products, debouncedSearch])
+
+  const { data: serverSearchResults = [] } = useQuery({
     queryKey: ['pos-search', debouncedSearch],
-    queryFn: () => fetchApi<Product[]>('/products/search', { q: debouncedSearch }),
-    enabled: debouncedSearch.length >= 2,
+    queryFn: ({ signal }) =>
+      fetchApi<Product[]>('/products/search', { q: debouncedSearch, comprehensive: 'false' }, { signal }),
+    enabled: Boolean(cacheError && debouncedSearch.length >= 2),
     staleTime: 10_000,
   })
+
+  const searchResults = productCache ? localSearchResults : serverSearchResults
+
+  const quickPickProducts = useMemo(
+    () =>
+      productCache?.products
+        ? buildQuickPickProducts(productCache.products, productCache.topProductIds)
+        : [],
+    [productCache]
+  )
 
   const isLongTermAcc = selectedCustomer?.creditTermType === 'long_term'
   const availableCredit = selectedCustomer
@@ -137,6 +164,7 @@ export default function POSPage() {
     }
 
     setSearch('')
+    rememberRecentProduct(productId)
   }
 
   const stepQty = (lineId: string, direction: 1 | -1) => {
@@ -315,6 +343,7 @@ export default function POSPage() {
       setPaidAmount(0)
       setPaymentMode('full')
       setSelectedCustomer(null)
+      invalidateProductQueries(queryClient)
       toast.success(`Sale completed! ${data.invoiceNumber}`)
     },
     onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
@@ -371,8 +400,19 @@ export default function POSPage() {
   }
 
   const handleBarcodeSearch = async (barcode: string) => {
+    const code = barcode.trim()
+    if (!code) return
+
+    const cached = productCache?.products
+      ? findProductByBarcodeLocally(productCache.products, code)
+      : undefined
+    if (cached) {
+      addToCart(cached)
+      return
+    }
+
     try {
-      const product = await fetchApi<Product>(`/products/barcode/${barcode}`)
+      const product = await fetchApi<Product>(`/products/barcode/${encodeURIComponent(code)}`)
       addToCart(product)
     } catch {
       toast.error('Product not found')
@@ -475,6 +515,50 @@ export default function POSPage() {
                     )
                   })}
                 </div>
+              )}
+              {search.length >= 2 && searchResults.length === 0 && !cacheLoading && (
+                <p className="mt-3 text-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
+                  No products match &quot;{search.trim()}&quot;
+                </p>
+              )}
+              {search.length < 2 && quickPickProducts.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                    Quick pick — recent &amp; top sellers
+                  </p>
+                  <div className="max-h-[20rem] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border-soft)]">
+                    {quickPickProducts.map((p) => {
+                      const step = getMinimumBunch(p)
+                      const price = getSellingPrice(p)
+                      return (
+                        <button
+                          key={p._id}
+                          type="button"
+                          className="flex w-full flex-col gap-2 border-b border-[var(--color-border-soft)] px-3 py-3 text-left last:border-0 hover:bg-[var(--color-accent-light)]/60 sm:flex-row sm:items-start sm:justify-between"
+                          onClick={() => addToCart(p)}
+                        >
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <p className="text-[var(--text-sm)] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                              {p.name}
+                            </p>
+                            <ProductSpecHighlight product={p} size="hero" />
+                            <p className="text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                              {p.sku} · min bunch {formatBunchLabel(step)}
+                            </p>
+                          </div>
+                          <div className="shrink-0 sm:pt-1 sm:text-right">
+                            <span className="font-data text-[var(--text-2xl)] font-bold text-[var(--color-accent)]">
+                              {formatCurrency(price)}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              {cacheLoading && search.length < 2 && (
+                <p className="mt-3 text-[var(--text-sm)] text-[var(--color-text-muted)]">Loading product catalog…</p>
               )}
             </CardContent>
           </Card>

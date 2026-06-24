@@ -25,6 +25,8 @@ export interface IProduct extends Document {
   warehouse?: string;
   unitType?: string;
   createdBy: mongoose.Types.ObjectId;
+  /** Denormalized lowercase search blob — name, sku, barcode, specs, prices, stock. */
+  searchText?: string;
 }
 
 const productSchema = new Schema<IProduct>(
@@ -56,6 +58,7 @@ const productSchema = new Schema<IProduct>(
     supplier: { type: Schema.Types.ObjectId, ref: 'Supplier' },
     warehouse: { type: String, default: 'main' },
     unitType: { type: String, default: 'piece' },
+    searchText: { type: String, default: '', trim: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }
@@ -64,5 +67,9 @@ const productSchema = new Schema<IProduct>(
 productSchema.index({ name: 'text', sku: 'text', barcode: 'text' });
 productSchema.index({ category: 1, status: 1 });
 productSchema.index({ currentStock: 1 });
+productSchema.index({ status: 1, searchText: 1 });
+productSchema.index({ status: 1, name: 1 });
+productSchema.index({ status: 1, barcode: 1 }, { sparse: true });
+productSchema.index({ status: 1, sku: 1 });
 
 export const Product = mongoose.model<IProduct>('Product', productSchema);

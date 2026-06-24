@@ -52,6 +52,7 @@ router.delete('/categories/:id/fields/:fieldId', authenticate, authorize(PERMISS
 
 // Products
 router.get('/products', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProducts);
+router.get('/products/pos-cache', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getPosProductCache);
 router.get('/products/search', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.advancedSearch);
 router.get('/products/barcode/:barcode', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProductByBarcode);
 router.get('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_VIEW), product.getProduct);

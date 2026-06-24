@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
 import routes from './routes';
@@ -29,6 +30,7 @@ app.use(
   })
 );
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
+app.use(compression({ threshold: 1024 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());

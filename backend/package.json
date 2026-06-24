@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/bwip-js": "^3.2.3",
+    "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -41,6 +42,7 @@
     "bcryptjs": "^3.0.3",
     "bwip-js": "^4.11.1",
     "cloudinary": "^2.10.0",
+    "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.1",

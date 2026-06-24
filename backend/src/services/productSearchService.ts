@@ -1,139 +1,144 @@
 import { performance } from 'node:perf_hooks';
+import mongoose from 'mongoose';
 import { Product } from '../models';
+import { Sale } from '../models/Sale';
+import { escapeRegex, productMatchesQuery, type SearchableProduct } from './productSearchTokens';
 import type { ProductSearchTimings } from '../utils/productSearchPerformance';
 
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+export { escapeRegex, productMatchesQuery, collectSearchTokens, type SearchableProduct } from './productSearchTokens';
 
-type PopulatedCategory = { name?: string; code?: string } | null | undefined;
-type PopulatedSupplier = { name?: string } | null | undefined;
+/** Fields required for POS cart, search dropdown, and barcode scan. */
+export const POS_PRODUCT_SELECT =
+  '_id name sku barcode sellingPrice wholesalePrice retailPrice currentStock minimumBunch reorderLevel attributes status updatedAt';
 
-interface SearchableProduct {
-  name?: string;
-  sku?: string;
-  barcode?: string;
-  brand?: string;
-  description?: string;
-  unitType?: string;
-  warehouse?: string;
+export type PosCacheProduct = Pick<
+  SearchableProduct,
+  | 'name'
+  | 'sku'
+  | 'barcode'
+  | 'sellingPrice'
+  | 'wholesalePrice'
+  | 'retailPrice'
+  | 'currentStock'
+  | 'minimumBunch'
+  | 'reorderLevel'
+  | 'attributes'
+  | 'status'
+> & { _id: string; updatedAt?: string };
+
+export interface SearchOptions {
+  limit?: number;
+  category?: string;
+  supplier?: string;
   status?: string;
-  category?: PopulatedCategory | string;
-  supplier?: PopulatedSupplier | string;
-  purchasePrice?: number;
-  wholesalePrice?: number;
-  retailPrice?: number;
-  sellingPrice?: number;
-  minimumBunch?: number;
-  currentStock?: number;
-  minStock?: number;
-  reorderLevel?: number;
-  attributes?: Record<string, unknown> | Map<string, unknown>;
+  timings?: ProductSearchTimings;
+  /** When true, apply in-memory attribute/spec matching after Mongo pre-filter. */
+  comprehensive?: boolean;
 }
 
-const collectSearchTokens = (product: SearchableProduct): string[] => {
-  const category =
-    product.category && typeof product.category === 'object'
-      ? (product.category as PopulatedCategory)
-      : null;
-  const supplier =
-    product.supplier && typeof product.supplier === 'object'
-      ? (product.supplier as PopulatedSupplier)
-      : null;
+function buildBaseFilter(options: SearchOptions): Record<string, unknown> {
+  const filter: Record<string, unknown> = {};
+  filter.status = options.status ?? 'active';
+  if (options.category) filter.category = new mongoose.Types.ObjectId(options.category);
+  if (options.supplier) filter.supplier = new mongoose.Types.ObjectId(options.supplier);
+  return filter;
+}
 
-  const attributeEntries: string[] = [];
-  const attrs = product.attributes;
-  if (attrs instanceof Map) {
-    attrs.forEach((value, key) => {
-      attributeEntries.push(String(key), String(value ?? ''));
-    });
-  } else if (attrs && typeof attrs === 'object') {
-    Object.entries(attrs).forEach(([key, value]) => {
-      attributeEntries.push(String(key), String(value ?? ''));
-    });
-  }
+/** Mongo-side search using indexed searchText field (includes name, sku, barcode, specs). */
+function buildMongoSearchFilter(query: string, baseFilter: Record<string, unknown>): Record<string, unknown> {
+  const terms = query.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (terms.length === 0) return baseFilter;
 
-  return [
-    product.name,
-    product.sku,
-    product.barcode,
-    product.brand,
-    product.description,
-    product.unitType,
-    product.warehouse,
-    product.status,
-    category?.name,
-    category?.code,
-    supplier?.name,
-    String(product.purchasePrice ?? ''),
-    String(product.wholesalePrice ?? ''),
-    String(product.retailPrice ?? ''),
-    String(product.sellingPrice ?? ''),
-    String(product.minimumBunch ?? ''),
-    String(product.currentStock ?? ''),
-    String(product.minStock ?? ''),
-    String(product.reorderLevel ?? ''),
-    ...attributeEntries,
-  ].filter((token): token is string => Boolean(token && String(token).trim().length > 0));
-};
+  const termClauses = terms.map((term) => ({
+    searchText: { $regex: escapeRegex(term), $options: 'i' },
+  }));
 
-/** True if every search term matches at least one product field (name, specs, prices, stock, etc.). */
-export const productMatchesQuery = (product: SearchableProduct, query: string): boolean => {
-  const trimmed = query.trim();
-  if (!trimmed) return false;
+  return {
+    ...baseFilter,
+    $and: termClauses,
+  };
+}
 
-  const tokens = collectSearchTokens(product);
-  const terms = trimmed.split(/\s+/).filter((t) => t.length > 0);
-
-  return terms.every((term) => {
-    const termRegex = new RegExp(escapeRegex(term), 'i');
-    const termNum = Number(term.replace(/,/g, ''));
-
-    if (tokens.some((t) => termRegex.test(t))) return true;
-    if (!Number.isNaN(termNum) && tokens.some((t) => Number(t) === termNum)) return true;
-
-    const lowerTerm = term.toLowerCase();
-    return tokens.some((t) => t.toLowerCase().includes(lowerTerm));
-  });
-};
-
-export async function searchProductsComprehensive(
+export async function searchProductsMongo(
   query: string,
-  options: {
-    limit?: number;
-    category?: string;
-    supplier?: string;
-    status?: string;
-    timings?: ProductSearchTimings;
-  } = {}
-) {
+  options: SearchOptions = {}
+): Promise<SearchableProduct[]> {
   const q = query.trim();
   if (q.length < 2) return [];
 
-  const filter: Record<string, unknown> = {};
-  if (options.status) filter.status = options.status;
-  else filter.status = 'active';
-  if (options.category) filter.category = options.category;
-  if (options.supplier) filter.supplier = options.supplier;
-
-  const mongoQueryStart = performance.now();
-  const products = await Product.find(filter)
-    .populate('category', 'name code')
-    .populate('supplier', 'name')
-    .sort({ name: 1 })
-    .lean();
-  const mongoQueryEnd = performance.now();
-
   const limit = options.limit ?? 50;
-  const results = products
-    .filter((product) => productMatchesQuery(product as SearchableProduct, q))
-    .slice(0, limit);
-  const formattingEnd = performance.now();
+  const baseFilter = buildBaseFilter(options);
+  const filter = buildMongoSearchFilter(q, baseFilter);
+
+  const mongoStart = performance.now();
+  let products = await Product.find(filter)
+    .select(POS_PRODUCT_SELECT)
+    .sort({ name: 1 })
+    .limit(options.comprehensive ? limit * 2 : limit)
+    .lean();
+  const mongoEnd = performance.now();
+
+  const formatStart = performance.now();
+  if (options.comprehensive) {
+    products = products.filter((product) => productMatchesQuery(product as SearchableProduct, q));
+  }
+  const results = products.slice(0, limit) as SearchableProduct[];
+  const formatEnd = performance.now();
 
   if (options.timings) {
-    options.timings.mongoQueryMs = mongoQueryEnd - mongoQueryStart;
-    options.timings.formattingMs = formattingEnd - mongoQueryEnd;
+    options.timings.mongoQueryMs = mongoEnd - mongoStart;
+    options.timings.populateMs = 0;
+    options.timings.formattingMs = formatEnd - formatStart;
   }
 
   return results;
+}
+
+/** Backward-compatible alias used by product list search and advanced search. */
+export async function searchProductsComprehensive(
+  query: string,
+  options: SearchOptions = {}
+): Promise<SearchableProduct[]> {
+  return searchProductsMongo(query, { ...options, comprehensive: true });
+}
+
+export async function getPosProductCache(): Promise<{
+  products: PosCacheProduct[];
+  version: string;
+  count: number;
+  topProductIds: string[];
+}> {
+  const [products, topSold] = await Promise.all([
+    Product.find({ status: 'active' })
+      .select(POS_PRODUCT_SELECT)
+      .sort({ name: 1 })
+      .lean(),
+    Sale.aggregate<{ _id: mongoose.Types.ObjectId }>([
+      { $match: { status: 'completed', createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.product', totalQty: { $sum: '$items.quantity' } } },
+      { $sort: { totalQty: -1 } },
+      { $limit: 15 },
+    ]),
+  ]);
+
+  const typed = products as unknown as PosCacheProduct[];
+  const maxUpdated = typed.reduce((max, p) => {
+    const ts = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+    return Math.max(max, ts);
+  }, 0);
+
+  return {
+    products: typed,
+    count: typed.length,
+    version: `${typed.length}-${maxUpdated}`,
+    topProductIds: topSold.map((row) => String(row._id)),
+  };
+}
+
+export async function findProductByBarcode(barcode: string): Promise<SearchableProduct | null> {
+  const product = await Product.findOne({ barcode, status: 'active' })
+    .select(POS_PRODUCT_SELECT)
+    .lean();
+  return product as SearchableProduct | null;
 }

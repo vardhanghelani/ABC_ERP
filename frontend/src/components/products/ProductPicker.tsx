@@ -33,7 +33,7 @@ export function ProductPicker({
   className,
 }: ProductPickerProps) {
   const [query, setQuery] = useState('')
-  const debouncedQuery = useDebouncedValue(query, 200)
+  const debouncedQuery = useDebouncedValue(query, 300)
   const [open, setOpen] = useState(false)
 
   const { data: selectedProduct } = useQuery({
@@ -45,11 +45,12 @@ export function ProductPicker({
 
   const { data: searchResults = [], isFetching } = useQuery({
     queryKey: ['product-picker', status, debouncedQuery],
-    queryFn: () =>
-      fetchApi<Product[]>('/products/search', {
-        q: debouncedQuery,
-        status,
-      }),
+    queryFn: ({ signal }) =>
+      fetchApi<Product[]>(
+        '/products/search',
+        { q: debouncedQuery, status, comprehensive: 'true' },
+        { signal }
+      ),
     enabled: open && debouncedQuery.trim().length >= 2,
     staleTime: 10_000,
   })
