@@ -15,5 +15,8 @@ export { Notification, NotificationType } from './Notification';
 export { AuditLog, AuditAction } from './AuditLog';
 export { Settings, DEFAULT_SETTINGS } from './Settings';
 export { BarcodeSequence } from './BarcodeSequence';
+export { PrintJob, PrintJobStatus, PrintJobSource } from './PrintJob';
+export type { LabelTemplateId, LabelOutputFormat, PrinterProfileId } from './PrintJob';
+export { BarcodePrintLog, BarcodePrintAction } from './BarcodePrintLog';
 export { DocumentCounter } from './DocumentCounter';
 export { IdempotencyRecord, IdempotencyStatus } from './IdempotencyRecord';

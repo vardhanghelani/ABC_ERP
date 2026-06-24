@@ -18,6 +18,7 @@ import * as report from '../controllers/reportController';
 import * as audit from '../controllers/auditController';
 import * as settings from '../controllers/settingsController';
 import * as importExport from '../controllers/importExportController';
+import * as barcodePrint from '../controllers/barcodePrintController';
 import * as credit from '../controllers/creditController';
 import * as reconciliation from '../controllers/reconciliationController';
 import { upload } from '../middleware/upload';
@@ -63,6 +64,20 @@ router.put('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE)
 router.delete('/products/:id', authenticate, authorize(PERMISSIONS.PRODUCTS_DELETE), product.deleteProduct);
 router.post('/products/:id/reactivate', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), product.reactivateProduct);
 router.post('/products/:id/image', authenticate, authorize(PERMISSIONS.PRODUCTS_UPDATE), upload.single('image'), product.uploadProductImage);
+
+// Barcode Center — print jobs, logs, calibration, diagnostics
+router.get('/barcode/templates', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getTemplates);
+router.get('/barcode/products', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getPrintableProducts);
+router.get('/barcode/print/jobs', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getPrintJobs);
+router.get('/barcode/print/jobs/:id', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getPrintJob);
+router.get('/barcode/print/jobs/:id/download', authenticate, authorize(PERMISSIONS.BARCODE_PRINT), barcodePrint.downloadJobOutput);
+router.post('/barcode/print/jobs', authenticate, authorize(PERMISSIONS.BARCODE_PRINT), validate(barcodePrint.createPrintJobSchema), barcodePrint.createPrintJob);
+router.post('/barcode/print/jobs/:id/cancel', authenticate, authorize(PERMISSIONS.BARCODE_MANAGE), barcodePrint.cancelJob);
+router.get('/barcode/print/logs', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getPrintLogs);
+router.post('/barcode/print/verify', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), validate(barcodePrint.verifyScanSchema), barcodePrint.verifyScan);
+router.post('/barcode/print/validate', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), validate(barcodePrint.validateLabelSchema), barcodePrint.validateLabel);
+router.post('/barcode/print/calibration', authenticate, authorize(PERMISSIONS.BARCODE_PRINT), validate(barcodePrint.calibrationSchema), barcodePrint.getCalibrationLabel);
+router.get('/barcode/print/diagnostics', authenticate, authorize(PERMISSIONS.BARCODE_VIEW), barcodePrint.getDiagnostics);
 
 // Inventory
 router.post('/inventory/stock-in', authenticate, authorize(PERMISSIONS.INVENTORY_MANAGE), validate(inventory.stockMovementBodySchema), inventory.stockIn);

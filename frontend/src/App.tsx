@@ -28,6 +28,7 @@ import CollectPaymentPage from '@/pages/CollectPaymentPage'
 import ExpensesPage from '@/pages/ExpensesPage'
 import ProfilePage from '@/pages/ProfilePage'
 import WarehousesPage from '@/pages/WarehousesPage'
+import BarcodeCenterPage from '@/pages/BarcodeCenterPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 60_000, refetchOnWindowFocus: false } },
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/settings" element={<ProtectedRoute permission="settings:manage"><SettingsPage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/warehouses" element={<ProtectedRoute permission="inventory:view"><WarehousesPage /></ProtectedRoute>} />
+            <Route path="/barcode-center" element={<ProtectedRoute permission="barcode:view"><BarcodeCenterPage /></ProtectedRoute>} />
             <Route path="*" element={<DefaultRedirect />} />
           </Routes>
         </BrowserRouter>

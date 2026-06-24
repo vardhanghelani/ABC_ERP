@@ -53,6 +53,10 @@ export const PERMISSIONS = {
   AUDIT_VIEW: 'audit:view',
   // Import/Export
   IMPORT_EXPORT: 'import_export:manage',
+  // Barcode Center
+  BARCODE_VIEW: 'barcode:view',
+  BARCODE_PRINT: 'barcode:print',
+  BARCODE_MANAGE: 'barcode:manage',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -71,6 +75,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     PERMISSIONS.POS_ACCESS,
     PERMISSIONS.ORDERS_VIEW,
     PERMISSIONS.ORDERS_MANAGE,
+    PERMISSIONS.BARCODE_VIEW,
   ],
   [UserRole.WAREHOUSE]: [
     PERMISSIONS.PRODUCTS_VIEW,
@@ -78,6 +83,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     PERMISSIONS.INVENTORY_MANAGE,
     PERMISSIONS.PURCHASES_VIEW,
     PERMISSIONS.SUPPLIERS_VIEW,
+    PERMISSIONS.BARCODE_VIEW,
+    PERMISSIONS.BARCODE_PRINT,
   ],
   [UserRole.ACCOUNTANT]: [
     PERMISSIONS.SALES_VIEW,

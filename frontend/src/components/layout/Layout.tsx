@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Tags, Warehouse, ShoppingCart, Users, Truck,
   FileText, CreditCard, BarChart3, Settings, LogOut, Bell, HelpCircle,
   ClipboardList, Receipt, UserCog, Wallet, IndianRupee, ChevronLeft, Menu,
-  Building2, User, ShieldCheck, HandCoins,
+  Building2, User, ShieldCheck, HandCoins, Barcode,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -21,6 +21,7 @@ const navSections = [
       { to: '/orders', icon: ClipboardList, label: 'Orders', permission: 'orders:view' },
       { to: '/collect-payment', icon: IndianRupee, label: 'Collect Payment', permission: 'payments:manage' },
       { to: '/products', icon: Package, label: 'Products', permission: 'products:view' },
+      { to: '/barcode-center', icon: Barcode, label: 'Barcode Center', permission: 'barcode:view' },
       { to: '/categories', icon: Tags, label: 'Categories', permission: 'categories:view' },
       { to: '/inventory', icon: Warehouse, label: 'Stock Movements', permission: 'inventory:view' },
     ],
@@ -59,6 +60,7 @@ const routeTitles: Record<string, string> = {
   '/pos': 'Point of Sale',
   '/collect-payment': 'Collect Payment',
   '/products': 'Products',
+  '/barcode-center': 'Barcode Center',
   '/products/inactive': 'Inactive Products',
   '/categories': 'Categories',
   '/inventory': 'Stock Movements',
