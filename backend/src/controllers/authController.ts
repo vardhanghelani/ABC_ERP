@@ -1,17 +1,24 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import { User } from '../models/User';
+import { AuditLog, AuditAction } from '../models/AuditLog';
 import { AuthRequest } from '../middleware/auth';
 import { ApiError } from '../utils/ApiError';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/tokens';
 import { logAudit } from '../middleware/auditLog';
-import { AuditAction } from '../models/AuditLog';
 import { paramId } from '../utils/params';
 import { UserRole, ROLE_PERMISSIONS } from '../utils/permissions';
 import { assertCanAssignRole, resolveAssignableRole } from '../utils/roleGuards';
 import { sanitizeLoginId } from '../services/userMigrationService';
+
+const loginDebug = process.env.LOGIN_DEBUG === 'true';
+
+function logLoginStep(step: string, startedAt: number, extra?: Record<string, unknown>) {
+  if (!loginDebug) return;
+  console.info('[login]', step, { ms: Date.now() - startedAt, ...extra });
+}
 
 const loginIdSchema = z
   .string()
@@ -53,13 +60,21 @@ export const updateUserSchema = z.object({
 });
 
 export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const startedAt = Date.now();
+  logLoginStep('entry', startedAt, { loginId: (req.body as { loginId?: string })?.loginId });
+
   const { loginId, password } = req.body as z.infer<typeof loginSchema>;
   const normalizedLoginId = sanitizeLoginId(loginId);
+  logLoginStep('validated', startedAt, { normalizedLoginId });
 
   const user = await User.findOne({ loginId: normalizedLoginId }).select('+password +refreshToken');
+  logLoginStep('user_lookup', startedAt, { found: Boolean(user) });
+
   if (!user || !(await user.comparePassword(password))) {
+    logLoginStep('password_compare_failed', startedAt);
     throw new ApiError(401, 'Invalid login ID or password');
   }
+  logLoginStep('password_compare_ok', startedAt);
 
   if (!user.isActive) {
     throw new ApiError(403, 'Account is deactivated');
@@ -68,12 +83,30 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = { id: user._id.toString(), role: user.role };
   const accessToken = generateAccessToken(payload);
   const refreshToken = generateRefreshToken(payload);
+  logLoginStep('tokens_generated', startedAt);
 
   user.refreshToken = refreshToken;
   user.lastLogin = new Date();
   await user.save();
+  logLoginStep('user_saved', startedAt);
 
-  await logAudit(req, AuditAction.LOGIN, 'User', user._id.toString(), undefined, 'User logged in');
+  try {
+    await AuditLog.create({
+      action: AuditAction.LOGIN,
+      entity: 'User',
+      entityId: user._id.toString(),
+      user: user._id,
+      userName: user.name,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      description: 'User logged in',
+    });
+  } catch (auditErr) {
+    if (loginDebug) {
+      console.error('[login] audit_log_failed', auditErr);
+    }
+  }
+  logLoginStep('response', startedAt);
 
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,

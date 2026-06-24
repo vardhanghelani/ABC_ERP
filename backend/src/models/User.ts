@@ -51,6 +51,7 @@ userSchema.pre('save', async function () {
 });
 
 userSchema.methods.comparePassword = async function (candidate: string): Promise<boolean> {
+  if (!this.password || typeof this.password !== 'string') return false;
   return bcrypt.compare(candidate, this.password);
 };
 
