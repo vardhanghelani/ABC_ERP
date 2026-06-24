@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { Response } from 'express';
 import { z } from 'zod';
 import { Product, Category, CategoryField } from '../models';
@@ -14,6 +15,11 @@ import { validateProductAttributes } from '../utils/validateAttributes';
 import { updateStock } from '../services/stockService';
 import { InventoryTransactionType } from '../models/InventoryTransaction';
 import { searchProductsComprehensive } from '../services/productSearchService';
+import {
+  createProductSearchTimer,
+  logProductSearchPerformance,
+  type ProductSearchTimings,
+} from '../utils/productSearchPerformance';
 import { sanitizeInteger, sanitizeMoney } from '../utils/numbers';
 
 const moneyField = z.preprocess((v) => sanitizeMoney(v), z.number().min(0));
@@ -240,6 +246,7 @@ export const uploadProductImage = asyncHandler(async (req: AuthRequest, res: Res
 });
 
 export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const timer = createProductSearchTimer();
   const q = (req.query.q as string)?.trim() || '';
   const category = req.query.category as string | undefined;
   const supplier = req.query.supplier as string | undefined;
@@ -250,11 +257,24 @@ export const advancedSearch = asyncHandler(async (req: AuthRequest, res: Respons
     return;
   }
 
+  const timings: ProductSearchTimings = { mongoQueryMs: 0, formattingMs: 0 };
   const products = await searchProductsComprehensive(q, {
     limit: 50,
     category,
     supplier,
     status,
+    timings,
+  });
+
+  const responseSendStart = performance.now();
+  res.once('finish', () => {
+    logProductSearchPerformance({
+      query: q,
+      mongoQueryMs: timings.mongoQueryMs,
+      formattingMs: timings.formattingMs,
+      responseSendMs: performance.now() - responseSendStart,
+      totalMs: timer.elapsedMs(),
+    });
   });
 
   ApiResponse.success(res, products);

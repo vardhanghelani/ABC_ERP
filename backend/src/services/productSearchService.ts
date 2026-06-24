@@ -1,4 +1,6 @@
+import { performance } from 'node:perf_hooks';
 import { Product } from '../models';
+import type { ProductSearchTimings } from '../utils/productSearchPerformance';
 
 export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -97,7 +99,13 @@ export const productMatchesQuery = (product: SearchableProduct, query: string): 
 
 export async function searchProductsComprehensive(
   query: string,
-  options: { limit?: number; category?: string; supplier?: string; status?: string } = {}
+  options: {
+    limit?: number;
+    category?: string;
+    supplier?: string;
+    status?: string;
+    timings?: ProductSearchTimings;
+  } = {}
 ) {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -108,12 +116,24 @@ export async function searchProductsComprehensive(
   if (options.category) filter.category = options.category;
   if (options.supplier) filter.supplier = options.supplier;
 
+  const mongoQueryStart = performance.now();
   const products = await Product.find(filter)
     .populate('category', 'name code')
     .populate('supplier', 'name')
     .sort({ name: 1 })
     .lean();
+  const mongoQueryEnd = performance.now();
 
   const limit = options.limit ?? 50;
-  return products.filter((product) => productMatchesQuery(product as SearchableProduct, q)).slice(0, limit);
+  const results = products
+    .filter((product) => productMatchesQuery(product as SearchableProduct, q))
+    .slice(0, limit);
+  const formattingEnd = performance.now();
+
+  if (options.timings) {
+    options.timings.mongoQueryMs = mongoQueryEnd - mongoQueryStart;
+    options.timings.formattingMs = formattingEnd - mongoQueryEnd;
+  }
+
+  return results;
 }
