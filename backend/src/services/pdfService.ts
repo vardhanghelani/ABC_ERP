@@ -1,4 +1,5 @@
 import { ISale } from '../models/Sale';
+import { formatSaleItemDescription } from '../utils/attributes';
 import {
   PORTRAIT_A4,
   PDF_THEME,
@@ -15,6 +16,7 @@ import {
   formatPdfMoney,
   paymentLabel,
   resolveCompanyName,
+  measurePdfRowHeight,
   type PdfTableColumn,
 } from './pdf/pdfLayout';
 
@@ -74,7 +76,16 @@ export const generateInvoicePDF = (
         y = layout.margin;
         drawItemsHeader();
       }
-      const rowHeight = item.productName.length > 32 ? 28 : layout.rowHeight;
+      const description = formatSaleItemDescription(item.productName, item.attributes);
+      const rowHeight = measurePdfRowHeight(doc, layout, itemColumns, [
+        String(index + 1),
+        item.sku,
+        description,
+        String(item.quantity),
+        formatPdfMoney(item.unitPrice),
+        item.discount > 0 ? formatPdfMoney(item.discount) : '-',
+        formatPdfMoney(item.total),
+      ]);
       y = drawPdfTableRow(
         doc,
         layout,
@@ -83,13 +94,13 @@ export const generateInvoicePDF = (
         [
           String(index + 1),
           item.sku,
-          item.productName,
+          description,
           String(item.quantity),
           formatPdfMoney(item.unitPrice),
           item.discount > 0 ? formatPdfMoney(item.discount) : '-',
           formatPdfMoney(item.total),
         ],
-        { height: rowHeight }
+        { height: rowHeight, wrap: true }
       );
     });
 
